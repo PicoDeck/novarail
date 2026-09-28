@@ -92,11 +92,11 @@ function M.build(tr, pal, double)
             rtri(E[i], Et[i], Et[j], wall, double); rtri(E[i], Et[j], E[j], wall, double)
         end
 
-        -- Ground: one quad per two segments on each side, checkered.
+        -- Ground: one quad per four segments on each side, checkered.
         local i = first
         while i <= last do
-            local j = math.min(i + 2, last + 1)
-            local q = (i - 1) // 2
+            local j = math.min(i + 4, last + 1)
+            local q = (i - 1) // 4
             local ca, cb = pal.ground[q % 2 + 1], pal.ground[(q + 1) % 2 + 1]
             gtri(Lg[i], Li[i], Li[j], ca); gtri(Lg[i], Li[j], Lg[j], ca)
             gtri(Ei[i], Eg[i], Eg[j], cb); gtri(Ei[i], Eg[j], Ei[j], cb)
