@@ -9,8 +9,8 @@ local g3 = picocalc.gfx3d
 local rgb = picocalc.display.rgb
 
 M.VIEW_W, M.VIEW_H = 320, 240 -- the HUD panel takes the bottom 80 rows
-M.NEAR, M.FAR = 0.5, 340
-M.FOG_NEAR, M.FOG_FAR = 120, 330
+M.NEAR, M.FAR = 0.5, 260
+M.FOG_NEAR, M.FOG_FAR = 90, 250
 M.GROUND_BIAS = 60 -- m: the ground sorts behind the road beside it
 
 local HORIZON = rgb(236, 170, 120)
