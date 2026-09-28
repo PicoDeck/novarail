@@ -1,0 +1,10 @@
+{
+  "id": "net.picodeck.novarail",
+  "name": "Nova Rail",
+  "description": "Anti-gravity racing (greybox build)",
+  "version": "0.1.0",
+  "author": "PicoDeck",
+  "category": "games",
+  "min_firmware": "0.5.0",
+  "requirements": ["audio"]
+}
