@@ -43,15 +43,21 @@ local function dense(points)
     return x, y, z, w, b, s, k
 end
 
+-- A number that is neither NaN nor infinite (Catmull-Rom turns an infinite
+-- control value into NaN geometry: inf - inf).
+local function finite(v)
+    return type(v) == "number" and v > -math.huge and v < math.huge
+end
+
 local function check_points(points)
     assert(type(points) == "table" and #points >= 4,
         "trackgen: a track needs at least 4 control points")
     local n = #points
     for i = 1, n do
         local p = points[i]
+        assert(type(p) == "table", "trackgen: point " .. i .. " is not a table")
         for c = 1, 5 do
-            assert(type(p[c]) == "number" and p[c] == p[c],
-                "trackgen: point " .. i .. " field " .. c .. " is not a number")
+            assert(finite(p[c]), "trackgen: point " .. i .. " field " .. c .. " is not a finite number")
         end
         assert(p[4] > 4, "trackgen: point " .. i .. " is narrower than 4 m")
     end
@@ -71,7 +77,11 @@ local function frames(tr)
         local dx, dy, dz = px[c] - px[a], py[c] - py[a], pz[c] - pz[a]
         local l = sqrt(dx * dx + dy * dy + dz * dz)
         dx, dy, dz = dx / l, dy / l, dz / l
-        assert(abs(dy) < 0.9, "trackgen: segment " .. i .. " is too steep")
+        if abs(dy) >= 0.9 then
+            local sp, np = tr.span[i], #tr.span_of
+            error(string.format("trackgen: between points %d and %d the track is too steep (segment %d)",
+                sp, sp % np + 1, i), 0)
+        end
         -- upright: world up with its component along T removed
         local bux, buy, buz = -dy * dx, 1 - dy * dy, -dy * dz
         local bl = sqrt(bux * bux + buy * buy + buz * buz)
@@ -100,6 +110,11 @@ M.PAD_SEGS = 2
 local function place_pads(tr, pads)
     tr.padid, tr.padlo, tr.padhi = {}, {}, {}
     for id, p in ipairs(pads or {}) do
+        assert(type(p) == "table", "trackgen: pad " .. id .. " is not a table")
+        for _, f in ipairs({ "at", "u", "half" }) do
+            assert(finite(p[f]), "trackgen: pad " .. id .. " field '" .. f .. "' is not a finite number")
+        end
+        assert(p.half > 0, "trackgen: pad " .. id .. " field 'half' must be positive")
         assert(p.at >= 0 and p.at < 1, "trackgen: pad " .. id .. " `at` must be in [0, 1)")
         local first = floor(p.at * tr.n) % tr.n + 1
         for k = 0, M.PAD_SEGS - 1 do
@@ -118,13 +133,14 @@ end
 -- px py pz (centre), tx ty tz / ux uy uz / rx ry rz (frame), w (width),
 -- bank, kr (1/m, > 0 bends right), ku (1/m, < 0 crest); pad arrays.
 function M.generate(def, seg_len)
+    assert(finite(seg_len) and seg_len > 0, "trackgen: seg_len must be a positive number")
     check_points(def.points)
     local x, y, z, w, b, s, k = dense(def.points)
     local total = s[k + 1]
     local n = floor(total / seg_len + 0.5)
     assert(n >= 8, "trackgen: the track is shorter than 8 segments")
     local tr = { name = def.name, n = n, len = total / n, total = total,
-        px = {}, py = {}, pz = {}, w = {}, bank = {} }
+        px = {}, py = {}, pz = {}, w = {}, bank = {}, span = {}, span_of = def.points }
     local j = 1
     for i = 1, n do
         local si = (i - 1) * tr.len
@@ -136,6 +152,7 @@ function M.generate(def, seg_len)
         tr.pz[i] = z[j] + (z[c] - z[j]) * f
         tr.w[i] = w[j] + (w[c] - w[j]) * f
         tr.bank[i] = b[j] + (b[c] - b[j]) * f
+        tr.span[i] = (j - 1) // M.SUB + 1 -- the control span this ring lies in
     end
     frames(tr)
     place_pads(tr, def.pads)

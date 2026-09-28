@@ -97,10 +97,10 @@ return {
     rejects_non_numbers = function()
         T.raises(function()
             trackgen.generate(def_with(function(d) d.points[2][2] = 0 / 0 end), 8)
-        end, "is not a number")
+        end, "point 2 field 2 is not a finite number")
         T.raises(function()
             trackgen.generate(def_with(function(d) d.points[2][4] = nil end), 8)
-        end, "is not a number")
+        end, "point 2 field 4 is not a finite number")
     end,
     rejects_narrow_road = function()
         T.raises(function()
@@ -128,5 +128,39 @@ return {
         T.raises(function()
             trackgen.generate(def_with(function(d) d.points[4][2] = 400 end), 8)
         end, "too steep")
+    end,
+    cliff_names_the_control_points = function()
+        -- A resampled segment number means nothing to a track author.
+        local ok, err = pcall(trackgen.generate, def_with(function(d) d.points[4][2] = 400 end), 8)
+        T.ok(not ok and tostring(err):find("between points %d+ and %d+"), tostring(err))
+    end,
+    rejects_infinite_values = function()
+        T.raises(function()
+            trackgen.generate(def_with(function(d) d.points[2][4] = math.huge end), 8)
+        end, "point 2 field 4 is not a finite number")
+        T.raises(function()
+            trackgen.generate(def_with(function(d) d.points[3][1] = -math.huge end), 8)
+        end, "point 3 field 1 is not a finite number")
+    end,
+    rejects_a_non_table_point = function()
+        T.raises(function()
+            trackgen.generate(def_with(function(d) d.points[3] = 5 end), 8)
+        end, "point 3 is not a table")
+    end,
+    rejects_a_pad_missing_a_field = function()
+        T.raises(function()
+            trackgen.generate(def_with(function(d) d.pads = { { at = 0.5, u = 0 } } end), 8)
+        end, "pad 1 field 'half'")
+        T.raises(function()
+            trackgen.generate(def_with(function(d) d.pads = { { at = 0.5, u = 0, half = 0 } } end), 8)
+        end, "pad 1 field 'half'")
+        T.raises(function()
+            trackgen.generate(def_with(function(d) d.pads = { 7 } end), 8)
+        end, "pad 1 is not a table")
+    end,
+    rejects_a_bad_segment_length = function()
+        for _, len in ipairs({ 0, -8, math.huge, 0 / 0 }) do
+            T.raises(function() trackgen.generate(F.circle_def(300, 8), len) end, "seg_len")
+        end
     end,
 }
