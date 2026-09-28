@@ -49,6 +49,6 @@ other reader of the serial port first.
 - `"autolap": true`: the autopilot drives; the app exits after `"laps"` laps
   (default 1) and writes `perf.json` (frame work and interval min/avg/p95/max,
   missed deadlines, lap times, gfx3d stats).
-- `"bench_audio": true`: plays `bench/music.mp3` and `bench/sfx1-6.wav` from the
+- `"bench_audio": true`: plays `bench/music.wav` and `bench/sfx1-6.wav` from the
   app directory (the gate tool stages them).
 - `"telemetry": true`: writes `telemetry.json` (the ship's state) every 15 frames.

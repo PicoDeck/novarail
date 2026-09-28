@@ -2,7 +2,7 @@
 -- 30 fps loop. /data/<APP_ID>/dev.json switches on test modes:
 --   autolap = true   the autopilot drives; the game exits after `laps` laps
 --                    (default 1) and writes perf.json (the hardware gate)
---   bench_audio = true  play APP_DIR/bench/music.mp3 and bench/sfx1-6.wav
+--   bench_audio = true  play APP_DIR/bench/music.wav and bench/sfx1-6.wav
 --   telemetry = true    write telemetry.json every 15 frames
 local trackgen = require("src.trackgen")
 local physics = require("src.physics")
@@ -46,16 +46,19 @@ local function write_json(name, value)
     fs.close(f)
 end
 
--- Music plus six looping voices, for the audio-headroom measurement.
+-- Music plus six looping voices, for the audio-headroom measurement. The
+-- music is a WAV streamed by a fileplayer: MP3 decoding on Core 1 contends
+-- with the game's core for the shared flash/PSRAM cache (PicoDeck's
+-- docs/API-Audio-and-Sound.md).
 local function start_bench_audio()
     local dir = APP_DIR .. "/bench"
-    local mp3 = pc.sound.mp3player()
-    if not (mp3 and mp3:load(dir .. "/music.mp3")) then
-        sys.log("bench audio: no " .. dir .. "/music.mp3")
+    local music = pc.sound.fileplayer()
+    if not (music and music:load(dir .. "/music.wav")) then
+        sys.log("bench audio: no " .. dir .. "/music.wav")
         return nil
     end
-    mp3:setVolume(50)
-    mp3:play(0)
+    music:setVolume(50)
+    music:play(0)
     local voices = {}
     for i = 1, 6 do
         local p = pc.sound.sampleplayer(dir .. "/sfx" .. i .. ".wav")
@@ -65,7 +68,7 @@ local function start_bench_audio()
             voices[#voices + 1] = p
         end
     end
-    return { mp3 = mp3, voices = voices }
+    return { music = music, voices = voices }
 end
 
 local function loading(text)
@@ -144,7 +147,7 @@ function M.run()
     end
     perf.setTargetFPS(0)
     if audio then
-        audio.mp3:stop()
+        audio.music:stop()
         for _, p in ipairs(audio.voices) do p:stop() end
     end
     if auto then

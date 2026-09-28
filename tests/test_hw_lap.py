@@ -48,10 +48,44 @@ def test_sfx_wav(tmp_path):
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
 def test_bench_pushes_stay_small(tmp_path):
-    music = tmp_path / "m.mp3"
-    hw_lap.music_mp3(music)
-    assert music.stat().st_size < 150_000
+    music = tmp_path / "m.wav"
+    hw_lap.music_wav(music)
+    assert music.stat().st_size < 250_000
     for i, hz in enumerate(hw_lap.SFX_HZ, 1):
         hw_lap.sfx_wav(tmp_path / f"sfx{i}.wav", hz)
     voices = sum((tmp_path / f"sfx{i}.wav").stat().st_size for i in range(1, 7))
     assert voices < 250_000
+
+
+def test_music_wav_is_small_mono_16bit(tmp_path):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("needs ffmpeg")
+    p = tmp_path / "music.wav"
+    hw_lap.music_wav(p)
+    with wave.open(str(p)) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 22050)
+    assert p.stat().st_size < 250_000
+
+
+def test_gate_sends_nothing_mid_race():
+    # The race window is measured with no dev commands in it: audiostat is
+    # reset before the launch and read after the exit.
+    calls = []
+
+    class Fake:
+        def command(self, cmd, timeout=None):
+            calls.append(("cmd", cmd))
+            return ["[DEV] Audio: isr_max_us=1 mp3_underruns=0"]
+
+        def launch_app(self, name):
+            calls.append(("launch", name))
+
+        def wait_for_exit(self, timeout):
+            calls.append(("exit", None))
+
+    stats = hw_lap.measured_run(Fake(), race_s=5, sleep=lambda s: calls.append(("sleep", s)))
+    kinds = [c[0] for c in calls]
+    launch, exit_ = kinds.index("launch"), kinds.index("exit")
+    assert "cmd" not in kinds[launch:exit_], calls
+    assert calls[0] == ("cmd", "audiostat reset") and calls[-1] == ("cmd", "audiostat")
+    assert stats["isr_max_us"] == 1

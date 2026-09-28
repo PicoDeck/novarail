@@ -4,14 +4,17 @@
     python3 tools/hw_lap.py --device /dev/serial/by-id/usb-Raspberry_Pi_PicoDeck_Device_<serial>-if00
 
 1. Reboots the device (a fresh heap), pushes Nova Rail plus generated bench
-   audio (music and six looping voices; two pushes, each under ~250 KB,
-   because push_app's unzip timeout assumes ~64 KB/s and the SD card writes
-   ~12 KB/s).
-2. Writes dev.json (autolap, `--laps`, bench_audio) and launches the app.
-3. Resets `audiostat` once the race is under way and reads it back 40 s
-   later, while the race still runs. No screenshot is taken during this
-   run: a screenshot transfer stalls Core 0 for seconds.
-4. Waits for the app to exit and reads perf.json.
+   audio (a looping 22.05 kHz mono WAV and six looping voices; two pushes,
+   each under ~250 KB, because push_app's unzip timeout assumes ~64 KB/s
+   and the SD card writes ~12 KB/s).
+2. Writes dev.json (autolap, `--laps`, bench_audio), resets `audiostat` and
+   launches the app.
+3. Sends NOTHING while the race runs: the device answers every dev command
+   inside the app, which stalls it a few ms (enough to miss a deadline), so
+   the tool sleeps through the expected race, then waits for the exit and
+   reads `audiostat` (its window spans the whole race) and perf.json. No
+   screenshot either: a transfer stalls Core 0 for seconds.
+4. Reads perf.json.
 5. Launches one more short autolap run for a screenshot (colour check),
    then deletes dev.json so the next launch from the launcher is a race.
 
@@ -59,8 +62,10 @@ def stage(dest: Path):
             shutil.copy(src, dest / name)
 
 
-def music_mp3(path: Path, seconds: int = 12):
-    """A loopable chord well above the speaker's weak low end."""
+def music_wav(path: Path, seconds: int = 5):
+    """A loopable chord well above the speaker's weak low end, as the game's
+    music will be: 16-bit WAV at 22.05 kHz mono (MP3 decoding on Core 1
+    slows the game's core; see PicoDeck's docs/API-Audio-and-Sound.md)."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise SystemExit("hw_lap: ffmpeg is needed for the bench music (or pass --no-audio)")
@@ -68,8 +73,8 @@ def music_mp3(path: Path, seconds: int = 12):
     subprocess.run([ffmpeg, "-v", "error", "-y",
                     "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
                     "-f", "lavfi", "-i", f"sine=frequency=660:duration={seconds}",
-                    "-filter_complex", "amix=inputs=2", "-ac", "2", "-ar", "44100",
-                    "-c:a", "libmp3lame", "-b:a", "64k", str(path)], check=True)
+                    "-filter_complex", "amix=inputs=2", "-ac", "1", "-ar", "22050",
+                    "-c:a", "pcm_s16le", str(path)], check=True)
 
 
 def sfx_wav(path: Path, hz: int, seconds: float = 0.5, rate: int = 22050):
@@ -92,6 +97,16 @@ def audiostat(t, arg=""):
             return {k: int(v) for k, v in
                     re.findall(r"(\w+)=(-?\d+)", line.split("Audio:", 1)[1])}
     raise RuntimeError(f"no Audio reply to 'audiostat {arg}': {lines}")
+
+
+def measured_run(t, race_s: float, sleep=time.sleep) -> dict:
+    """Launch and wait out the race with no dev command in between; returns
+    the `audiostat` whose window spans the whole race."""
+    audiostat(t, "reset")
+    t.launch_app(APP)
+    sleep(race_s)
+    t.wait_for_exit(timeout=120)
+    return audiostat(t)
 
 
 def verdict(perf: dict, audio) -> list:
@@ -128,7 +143,7 @@ def main():
             app = Path(tmp) / APP
             stage(app)
             if audio_on:
-                music_mp3(app / "bench" / "music.mp3")
+                music_wav(app / "bench" / "music.wav")
             t.push_app(app, APP)
         if audio_on:
             # Same app.json (no extra reboot); unzip merges into /apps/novarail.
@@ -143,13 +158,8 @@ def main():
         t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(dev).encode())
         t.delete_file(f"/data/{APP_ID}/perf.json")
 
-        t.launch_app(APP)
-        time.sleep(12)
-        audiostat(t, "reset")
-        time.sleep(40)
-        stats = audiostat(t)
+        stats = measured_run(t, race_s=40 * args.laps + 8)
         audio = stats if audio_on else None
-        t.wait_for_exit(timeout=60 * args.laps + 120)
         perf = json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
 
         # A second, short run for the screenshot.
@@ -182,8 +192,10 @@ def main():
           f"  missed {perf.get('missed')}")
     print(f"gfx3d {perf.get('gfx3d')}")
     print(f"audiostat {stats}")
-    if audio_on and stats.get("mp3_underruns", 0) > 0:
-        print(f"WARN: {stats['mp3_underruns']} MP3 underruns during the race")
+    # The WAV music plays through the stream ring: over 0.1 s of it missing
+    # is audible (a few hundred frames at the start, before it fills, is not).
+    if audio_on and stats.get("stream_underruns", 0) > 4410:
+        print(f"WARN: {stats['stream_underruns']} stream frames underran during the race")
     if w.get("p95", 0) > WORK_P95_TARGET_US:
         print(f"WARN: work p95 {w.get('p95')} us leaves less than P4's headroom")
     print(f"report: reports/hw_lap-{stamp}.json")
