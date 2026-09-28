@@ -5,7 +5,7 @@ export PICODECK_ROOT
 .PHONY: test test-host test-lua32 test-tools e2e hw-lap clean
 
 # Host tests under the system Lua and under lua32 (the device's numbers).
-test: test-host test-lua32
+test: test-host test-lua32 test-tools
 
 test-host:
 	$(LUA) tests/run.lua

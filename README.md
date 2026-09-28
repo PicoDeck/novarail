@@ -31,10 +31,16 @@ Thrust is automatic: the keyboard reports at most three keys at once.
 
     make test        # host tests under lua and lua32
     make e2e         # simulator smoke tests (build PicoDeck's simulator first)
+    make hw-lap DEVICE=/dev/serial/by-id/usb-Raspberry_Pi_PicoDeck_Device_<serial>-if00
 
 `PICODECK_ROOT` (default `~/Projects/PicoDeck/picodeck`) locates PicoDeck's Lua
 sources.
 `PICODECK_SIM_BINARY` picks another simulator build.
+
+`make hw-lap` is the hardware gate (`tools/hw_lap.py`): two autopilot laps with
+bench audio; it passes when no frame misses its 33.3 ms deadline, the frame
+interval's p95 is at most 34 ms and the audio ISR stays under 2.4 ms. Stop any
+other reader of the serial port first.
 
 ## Test modes
 
