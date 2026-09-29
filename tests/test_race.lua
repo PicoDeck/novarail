@@ -147,6 +147,21 @@ return {
         T.ok(r.finish[1], "finished"); T.eq(r.out[1], nil)
         T.eq(race.results(r, tr, ships)[1].dnf, false)
     end,
+    retired_ships_keep_their_order_in_32_bit_floats = function()
+        -- two retired ships 0.8 m apart: the one further on ranks higher (a
+        -- key of progress - 1e6 loses that in single precision)
+        local r, ships = started(3, 3)
+        ships[1].seg, ships[1].t = 100, 0.30
+        ships[2].seg, ships[2].t = 100, 0.40
+        ships[3].seg, ships[3].t = 50, 0
+        ships[1].dnf, ships[2].dnf = true, true
+        race.update(r, ships)
+        T.eq(r.out[1], true); T.eq(r.out[2], true)
+        local order = race.standings(r, tr, ships, {})
+        T.eq(order[1], 3, "the running ship leads")
+        T.eq(order[2], 2, "the retired ship further on")
+        T.eq(order[3], 1)
+    end,
     ms_from_frames = function()
         T.eq(race.ms(30), 1000); T.eq(race.ms(45), 1500); T.eq(race.ms(nil), nil)
     end,

@@ -36,7 +36,7 @@ end
 function M.new(tr, nships, laps, slot_of)
     local r = { phase = "countdown", frame = 0, start = nil, laps = laps, n = nships,
         seen = {}, lap_start = {}, last = {}, best = {}, times = {}, finish = {}, out = {},
-        order = {}, done = nil, key = {}, scratch = {} }
+        order = {}, done = nil, key = {}, tier = {}, scratch = {} }
     local ships = {}
     for k = 1, nships do
         ships[k] = physics.new_ship(M.grid(tr, slot_of and slot_of(k, nships) or k))
@@ -119,23 +119,27 @@ end
 M.progress = progress
 
 -- Fills `out` with ship indices, leader first: finishers in finishing
--- order, then running ships by progress, then retired ones. Allocates
+-- order, then running ships by progress, then retired ones by progress.
+-- Ranks by an integer tier, then by progress within it: a single blended
+-- key (progress - 1e6) would lose the fraction in 32-bit floats. Allocates
 -- nothing when `out` is reused.
 function M.standings(r, tr, ships, out)
-    local key = r.key
+    local key, tier = r.key, r.tier
     for i = 1, r.n do
-        local k = progress(tr, ships[i])
-        if r.out[i] then k = k - 1e6 end
-        key[i] = k
+        key[i] = progress(tr, ships[i])
+        tier[i] = r.out[i] and 0 or 1
         out[i] = i
     end
-    for pos, i in ipairs(r.order) do key[i] = 1e6 - pos end
-    for a = 2, r.n do -- insertion sort, descending, stable
+    for pos, i in ipairs(r.order) do key[i], tier[i] = -pos, 2 end
+    for a = 2, r.n do -- insertion sort, descending by (tier, key), stable
         local v = out[a]
-        local kv = key[v]
+        local tv, kv = tier[v], key[v]
         local b = a - 1
-        while b >= 1 and key[out[b]] < kv do
-            out[b + 1] = out[b]
+        while b >= 1 do
+            local u = out[b]
+            local tu = tier[u]
+            if tu > tv or (tu == tv and key[u] >= kv) then break end
+            out[b + 1] = u
             b = b - 1
         end
         out[b + 1] = v
