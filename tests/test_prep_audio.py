@@ -1,5 +1,6 @@
 """tools/prep_audio.sh on short generated sources: the files the game plays,
 in the formats it expects."""
+import json
 import shutil
 import struct
 import subprocess
@@ -51,3 +52,22 @@ def test_refuses_an_engine_sample_over_64_kb(tmp_path):
     r = run(tree(tmp_path, engine_s=2.0))  # 2 s of 16-bit 22.05 kHz mono: 88 KB
     assert r.returncode == 1
     assert "64 KB" in r.stderr
+
+
+def embedded_prompt(path):
+    """The text prompt in a file's embedded ComfyUI workflow metadata."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags=prompt",
+                          "-of", "json", str(path)], capture_output=True, text=True,
+                         check=True).stdout
+    graph = json.loads(json.loads(out)["format"]["tags"]["prompt"])
+    texts = [n["inputs"][k] for n in graph.values() for k in ("prompt", "text")
+             if isinstance(n.get("inputs", {}).get(k), str)]
+    assert len(texts) == 1, texts
+    return texts[0]
+
+
+def test_prompts_md_quotes_each_source_files_own_prompt():
+    # The files carry the prompt that made them; the doc must quote it.
+    doc = (REPO / "tools" / "prompts.md").read_text()
+    for name in ("track01.mp3", "track02.mp3", "engine.flac"):
+        assert embedded_prompt(REPO / "assets" / "src" / name) in doc, name
