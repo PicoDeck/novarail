@@ -4,7 +4,8 @@
 local T = require("tests.t")
 
 -- The modules that talk to picocalc; every other src module must not.
-local DEVICE = { render = true, hud = true, controls = true, game = true }
+local DEVICE = { render = true, hud = true, controls = true, game = true, results = true,
+    audio = true }
 local FORBIDDEN = { "io%.", "os%.", "package%.", "debug%.", "dofile", "loadfile", "loadstring", "setfenv" }
 
 local function ls(pattern)

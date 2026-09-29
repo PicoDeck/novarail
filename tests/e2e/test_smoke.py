@@ -1,5 +1,6 @@
-"""Nova Rail smoke tests in the simulator: the race runs, steering steers,
-the autopilot lap writes perf.json, and bad inputs degrade gracefully.
+"""Nova Rail smoke tests in the simulator: the race runs (countdown, rivals,
+results), steering steers, music and the engine note play, the autolap race
+writes perf.json, and bad inputs degrade gracefully.
 Frame times here are meaningless (the simulator is not the device); the
 hardware gate is tools/hw_lap.py."""
 import io
@@ -9,7 +10,7 @@ import time
 import pytest
 from PIL import Image
 
-from conftest import APP
+from conftest import APP, qoa_bytes, wav_bytes
 
 
 def wait_json(path, cond, timeout=20.0):
@@ -55,6 +56,41 @@ def test_race_runs_and_steers(novarail):
     assert not lua_errors(sim)
 
 
+def audio_assets(music_s=2.0):
+    """Short stand-ins for the game's audio (the real files come from make
+    assets): stereo 44.1 kHz QOA music, a WAV engine sample."""
+    return {"assets/music/track01.qoa": qoa_bytes(music_s, 220),
+            "assets/music/track02.qoa": qoa_bytes(music_s, 330),
+            "assets/sfx/engine.wav": wav_bytes(0.5, 110)}
+
+
+def test_race_plays_music_and_engine(novarail):
+    # The track is 2 s long: still playing 5 s into the race means it loops.
+    sim, data = novarail(dev={"telemetry": True}, assets=audio_assets())
+    sim.launch_app(APP)
+    tel = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 150)
+    assert tel["music"] is True and tel["engine"] is True, tel
+    state = sim.call("get_audio_state")
+    assert state["stream_active"] and state["sound_players_active"] >= 1, state
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    state = sim.call("get_audio_state")
+    assert not state["stream_active"] and state["sound_players_active"] == 0, state
+    assert not lua_errors(sim)
+
+
+@pytest.mark.parametrize("junk", [b"", b"RIFF\x00\x00", b"not a wav file at all" * 20])
+def test_bad_audio_files_mean_silence(novarail, junk):
+    assets = {k: junk for k in audio_assets()}
+    sim, data = novarail(dev={"telemetry": True}, assets=assets)
+    sim.launch_app(APP)
+    tel = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 60)
+    assert tel["music"] is False and tel["engine"] is False, tel
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    assert not lua_errors(sim)
+
+
 def test_autolap_writes_perf_json(novarail):
     sim, data = novarail(dev={"autolap": True, "laps": 1})
     sim.launch_app(APP)
@@ -69,10 +105,50 @@ def test_autolap_writes_perf_json(novarail):
         assert set(perf[key]) == {"min", "avg", "p95", "max"}, perf[key]
     assert perf["gfx3d"]["drawn_avg"] > 50, perf["gfx3d"]
     assert perf["bench_audio"] is False
+    assert isinstance(perf["late"], int)
+    assert set(perf["sections"]) == {"input", "sim", "camera", "draw", "hud"}
+    assert perf["rivals"] == 5
+    assert [r["pos"] for r in perf["results"]] == [1, 2, 3, 4, 5, 6]
+    assert sorted(r["idx"] for r in perf["results"]) == [1, 2, 3, 4, 5, 6]
 
 
-def test_bad_dev_json_is_ignored(novarail):
-    sim, data = novarail(dev_text="{ not json")
+def test_countdown_holds_the_grid(novarail):
+    sim, data = novarail(dev={"telemetry": True})
+    sim.launch_app(APP)
+    early = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 30)
+    assert early["phase"] == "countdown" and early["v"] == 0, early
+    later = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 150)
+    assert later["phase"] == "racing" and later["v"] > 20, later
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+
+
+def test_results_page_then_race_again_or_quit(novarail):
+    # The AI drives the player through a one-lap solo race (~45 s); `stay` keeps the
+    # results page up for keys.
+    sim, data = novarail(dev={"telemetry": True, "autolap": True, "stay": True, "rivals": 0,
+                              "laps": 1}, assets=audio_assets())
+    sim.launch_app(APP)
+    tel = data / "telemetry.json"
+    assert wait_json(tel, lambda d: d["frame"] >= 15)["track"] == 1
+    # Alone on track, the player's finish ends the race at once: the results
+    # page (a few flat colours, not the 3D view) replaces the race.
+    deadline = time.monotonic() + 90
+    while colours(sim.screenshot(), (0, 0, 320, 240)) > 8:
+        assert time.monotonic() < deadline, "no results page"
+        time.sleep(0.5)
+    first = json.loads(tel.read_text())["frame"]
+    sim.keypress("enter")               # race again: a new countdown, the next track
+    again = wait_json(tel, lambda d: d["frame"] < first and d["phase"] == "countdown", timeout=20)
+    assert again["track"] == 2 and again["music"] is True, again
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    assert not lua_errors(sim)
+
+
+@pytest.mark.parametrize("text", ["{ not json", "[1, 2]", '"x"'])
+def test_bad_dev_json_is_ignored(novarail, text):
+    sim, data = novarail(dev_text=text)
     sim.launch_app(APP)
     time.sleep(3)
     assert sim.call("get_running_app").get("running"), "the race should be running"
@@ -83,8 +159,9 @@ def test_bad_dev_json_is_ignored(novarail):
     assert not lua_errors(sim)
 
 
-def test_zero_laps_means_one(novarail):
-    sim, data = novarail(dev={"autolap": True, "laps": 0})
+@pytest.mark.parametrize("laps", [0, -3, "x"])
+def test_bad_laps_mean_one(novarail, laps):
+    sim, data = novarail(dev={"autolap": True, "laps": laps, "rivals": 0})
     sim.launch_app(APP)
     res = sim.wait_for_exit(timeout=150)
     assert res["result"] == "returned", res
@@ -112,3 +189,38 @@ def test_old_firmware_gets_a_message(novarail, prelude):
     res = sim.wait_for_exit(timeout=10)
     assert res["result"] == "returned", res
     assert not lua_errors(sim)
+
+
+def test_esc_in_the_countdown_quits_cleanly(novarail):
+    sim, data = novarail(dev={"telemetry": True}, assets=audio_assets())
+    sim.launch_app(APP)
+    tel = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 30)
+    assert tel["phase"] == "countdown", tel
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    state = sim.call("get_audio_state")
+    assert not state["stream_active"] and state["sound_players_active"] == 0, state
+    assert not lua_errors(sim)
+
+
+def test_no_audio_files_means_silence(novarail):
+    # A checkout without `make assets`: the race runs, silent.
+    sim, data = novarail(dev={"telemetry": True})
+    sim.launch_app(APP)
+    tel = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 60)
+    assert tel["music"] is False and tel["engine"] is False, tel
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    assert not lua_errors(sim)
+
+
+@pytest.mark.parametrize("rivals,want", [(-1, 0), (9, 5), ("x", 5)])
+def test_bad_rivals_are_clamped(novarail, rivals, want):
+    sim, data = novarail(dev={"autolap": True, "laps": 1, "rivals": rivals})
+    sim.launch_app(APP)
+    res = sim.wait_for_exit(timeout=150)
+    assert res["result"] == "returned", res
+    assert not lua_errors(sim)
+    perf = json.loads((data / "perf.json").read_text())
+    assert perf["rivals"] == want and len(perf["results"]) == want + 1, perf
+
