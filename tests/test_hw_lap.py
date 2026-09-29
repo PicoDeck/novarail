@@ -273,3 +273,78 @@ def test_soak_minutes_come_from_the_measured_frame_interval():
             "battery": {"start": 90, "finish": 84}}
     _, report = hw_lap.soak_summary(perf, 200000)
     assert report["minutes"] == 14.4
+
+
+def test_soak_summary_refuses_a_flat_battery():
+    # The on-device USB-power flag is not reliable (isUSBPowered reads a
+    # wireless-chip pin on this board): a level that never fell over a long
+    # run is the tell instead.
+    perf = {"frames": 30 * 60 * 12, "interval_us": {"avg": 33333},
+            "battery": {"start": 80, "finish": 80}}
+    line, report = hw_lap.soak_summary(perf, 300000)
+    assert "did not fall" in line and "probably on USB power" in line
+    assert "percent_per_hour" not in report
+
+
+def test_soak_summary_refuses_a_battery_that_rose():
+    perf = {"frames": 30 * 60 * 12, "interval_us": {"avg": 33333},
+            "battery": {"start": 80, "finish": 82}}
+    line, _ = hw_lap.soak_summary(perf, 300000)
+    assert "did not fall" in line
+
+
+def test_soak_summary_accepts_a_short_flat_reading():
+    # Under 10 minutes, a flat reading is just coarse battery quantisation,
+    # not a USB-power tell.
+    perf = {"frames": 30 * 60 * 5, "interval_us": {"avg": 33333},
+            "battery": {"start": 80, "finish": 80}}
+    line, report = hw_lap.soak_summary(perf, 300000)
+    assert "did not fall" not in line
+    assert report["percent_per_hour"] == 0.0
+
+
+def test_race_failures_pass_a_full_race():
+    perf = {"laps": 3, "results": [{"idx": 1, "pos": 2, "time": 123456, "dnf": False}]}
+    assert hw_lap.race_failures(perf, 3) == []
+
+
+def test_race_failures_fail_a_short_race():
+    perf = {"laps": 2, "results": [{"idx": 1, "pos": 1, "time": 99999, "dnf": False}]}
+    fails = hw_lap.race_failures(perf, 3)
+    assert fails and any("2" in f and "3" in f for f in fails)
+
+
+def test_race_failures_fail_a_dnf():
+    perf = {"laps": 3, "results": [{"idx": 1, "pos": 6, "time": None, "dnf": True}]}
+    fails = hw_lap.race_failures(perf, 3)
+    assert fails and any("dnf" in f.lower() for f in fails)
+
+
+def test_race_failures_fail_missing_results():
+    perf = {"laps": 3, "results": [{"idx": 2, "pos": 1, "time": 1, "dnf": False}]}
+    assert hw_lap.race_failures(perf, 3)
+    assert hw_lap.race_failures({"laps": 3}, 3)
+
+
+def test_soak_stage_zero_is_refused(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv",
+                        ["hw_lap.py", "--device", "/dev/null", "--soak-stage", "0"])
+    with pytest.raises(SystemExit):
+        hw_lap.main()
+    assert "soak-stage" in capsys.readouterr().err
+
+
+def test_soak_stage_negative_is_refused(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv",
+                        ["hw_lap.py", "--device", "/dev/null", "--soak-stage", "-1"])
+    with pytest.raises(SystemExit):
+        hw_lap.main()
+    assert "soak-stage" in capsys.readouterr().err
+
+
+def test_install_with_no_audio_is_refused(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv",
+                        ["hw_lap.py", "--device", "/dev/null", "--install", "--no-audio"])
+    with pytest.raises(SystemExit):
+        hw_lap.main()
+    assert "--install" in capsys.readouterr().err

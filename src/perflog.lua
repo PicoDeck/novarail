@@ -16,6 +16,11 @@ function M.new(capacity)
     return log
 end
 
+-- Reuse a log across races: drop its entries, keep the arrays.
+function M.reset(log)
+    log.n = 0
+end
+
 -- Returns false once full (later frames are not recorded).
 function M.add(log, work_us, interval_us)
     if log.n >= log.cap then return false end

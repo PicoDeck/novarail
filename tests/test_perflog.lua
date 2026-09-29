@@ -47,4 +47,15 @@ return {
         local s = perflog.summary(log)
         T.eq(s.interval_us.avg, 33333)
     end,
+    reset_lets_a_log_be_reused = function()
+        local log = perflog.new(4)
+        perflog.add(log, 20000, 33333)
+        perflog.add(log, 33334, 33400)
+        perflog.reset(log)
+        T.eq(log.n, 0)
+        perflog.add(log, 10000, 20000)
+        local s = perflog.summary(log)
+        T.eq(s.frames, 1); T.eq(s.missed, 0)
+        T.eq(s.work_us.max, 10000); T.eq(s.interval_us.min, 20000)
+    end,
 }

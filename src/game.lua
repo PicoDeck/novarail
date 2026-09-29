@@ -130,7 +130,8 @@ local function race_once(env)
         ctl[i] = {}
     end
     local me, cam = ships[1], camera.new()
-    local log = perflog.new(M.LOG_FRAMES)
+    local log = env.log
+    if log then perflog.reset(log) end
     local g = { geom = 0, raster = 0, drawn = 0, drawn_max = 0, tris_max = 0, n = 0 }
     local sec = { input = 0, sim = 0, camera = 0, draw = 0, hud = 0 }
     local st, hs = {}, { laps = env.laps, n = n }
@@ -208,7 +209,7 @@ local function race_once(env)
         local t1 = now()
         work = t1 - t0 -- integer subtraction: right across the 32-bit wrap
         if prev_t0 and frame > M.WARMUP then
-            perflog.add(log, work, t0 - prev_t0)
+            if log then perflog.add(log, work, t0 - prev_t0) end
             g.geom, g.raster, g.drawn = g.geom + st.us_geom, g.raster + st.us_raster, g.drawn + st.drawn
             g.drawn_max = math.max(g.drawn_max, st.drawn)
             g.tris_max = math.max(g.tris_max, st.tris_in)
@@ -260,6 +261,7 @@ function M.run()
         laps = math.max(1, math.tointeger(dev.laps) or (auto and 1 or 3)),
         rivals = math.min(5, math.max(0, math.tointeger(dev.rivals) or 5)),
     }
+    if auto then env.log = perflog.new(M.LOG_FRAMES) end
     if dev.mute ~= true then env.sound = audio.new() end
     if dev.bench_sfx == true then env.bench = start_bench_sfx() end
     local out

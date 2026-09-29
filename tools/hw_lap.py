@@ -195,6 +195,20 @@ def verdict(perf: dict, audio) -> list:
     return fails
 
 
+def race_failures(perf: dict, laps: int) -> list:
+    """Gate failures for a run meant to finish `laps` laps, from the
+    player's (idx 1) row in perf["results"]."""
+    fails = []
+    if perf.get("laps", 0) < laps:
+        fails.append(f"the player completed {perf.get('laps', 0)} of {laps} laps")
+    row = next((r for r in perf.get("results", []) if r.get("idx") == 1), None)
+    if row is None:
+        fails.append("no results row for the player (idx 1)")
+    elif row.get("dnf"):
+        fails.append("the player did not finish (dnf)")
+    return fails
+
+
 def audio_failures(perf: dict) -> list:
     """Gate failures for a run meant to play the game's audio and the bench
     voices, from what perf.json says was playing when the race ended."""
@@ -211,7 +225,7 @@ def audio_failures(perf: dict) -> list:
 
 def soak_summary(perf: dict, clock_khz) -> tuple:
     """A battery run's result: (one line, report dict). The battery level
-    reads -1 on USB power."""
+    reads -1 only before the first reading."""
     bat = perf.get("battery") or {}
     start, finish = bat.get("start", -1), bat.get("finish", -1)
     interval = (perf.get("interval_us") or {}).get("avg") or 33333
@@ -224,6 +238,12 @@ def soak_summary(perf: dict, clock_khz) -> tuple:
     if start < 0 or finish < 0 or minutes <= 0:
         return (f"no battery reading (start {start}, finish {finish}): was the cable "
                 "unplugged for the whole race?", report)
+    # isUSBPowered() reads a wireless-chip pin on this board and is not
+    # reliable (PicoDeck docs); a level that never fell over a long run is
+    # the tell instead.
+    if minutes >= 10 and finish >= start:
+        return (f"the battery level did not fall over {minutes:.0f} min: probably on "
+                "USB power", report)
     per_hour = (start - finish) / minutes * 60
     report["percent_per_hour"] = round(per_hour, 1)
     return (f"{clock_khz} kHz: battery {start}% -> {finish}% over {minutes:.1f} min "
@@ -285,6 +305,7 @@ def gate(args, audio: str):
     fails = verdict(perf, stats if audio != "none" else None)
     if audio != "none":
         fails += audio_failures(perf)
+    fails += race_failures(perf, args.laps)
     write_report(reports, f"hw_lap-{stamp}", {"perf": perf, "audiostat": stats,
                                               "gate_failures": fails, "laps": args.laps,
                                               "rivals": args.rivals, "audio": audio,
@@ -377,6 +398,11 @@ def main():
     ap.add_argument("--picodeck", default=os.environ.get(
         "PICODECK_ROOT", str(Path.home() / "Projects" / "PicoDeck" / "picodeck")))
     args = ap.parse_args()
+    if args.install and args.no_audio:
+        ap.error("--install cannot be combined with --no-audio: an install without "
+                 "mute would play leftover audio")
+    if args.soak_stage is not None and args.soak_stage <= 0:
+        ap.error("--soak-stage needs a positive number of minutes")
     if args.soak_read:
         return soak_read(args)
     audio = "none" if args.no_audio else ("full" if args.install else "bench")
@@ -385,7 +411,7 @@ def main():
         raise SystemExit(f"hw_lap: no {', '.join(missing)}: run make assets (or pass --no-audio)")
     if args.install:
         return install(args, audio)
-    if args.soak_stage:
+    if args.soak_stage is not None:
         return soak_stage(args, audio)
     return gate(args, audio)
 

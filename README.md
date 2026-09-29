@@ -51,7 +51,9 @@ deadline or is shown late, the frame interval's p95 is at most 34 ms and the
 audio ISR stays under 2.4 ms. It sends nothing to the device during the race.
 Stop any other reader of the serial port first. The same tool installs the game
 with all its music for playing (`--install`) and measures battery drain
-(`--soak-stage`, then `--soak-read`; see its help).
+(`--soak-stage`, then `--soak-read`; see its help). The on-device USB-power
+flag is not reliable, so `--soak-read` also refuses a run whose battery level
+did not fall.
 
 ## Test modes
 
