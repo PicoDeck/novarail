@@ -139,6 +139,15 @@ return {
         physics.step(tr, s, { steer = 0 }, 1 / 60)
         T.eq(s.energy, P.ENERGY, "capped")
     end,
+    no_recharge_once_out = function()
+        local tr = F.track1()
+        local seg
+        for i = 1, tr.n do if tr.recharge[i] then seg = i; break end end
+        local s = physics.new_ship(seg, 0, 0)
+        s.v, s.energy, s.dnf = 10, 0, true
+        physics.step(tr, s, { steer = 0 }, 1 / 60)
+        T.eq(s.energy, 0, "a retired ship does not recharge")
+    end,
     thrust_scale_scales_the_push = function()
         local a, b = physics.new_ship(), physics.new_ship()
         run(circle, a, { steer = 0, thrust = true, thrust_scale = 1.1 }, 2)
