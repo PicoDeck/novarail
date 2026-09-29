@@ -6,6 +6,7 @@ import io
 import json
 import time
 
+import pytest
 from PIL import Image
 
 from conftest import APP
@@ -90,13 +91,23 @@ def test_zero_laps_means_one(novarail):
     assert json.loads((data / "perf.json").read_text())["laps"] == 1
 
 
-def test_old_firmware_gets_a_message(novarail):
-    # Firmware before gfx3d: the app must explain, not raise.
-    sim, _ = novarail(prelude="picocalc.gfx3d = nil")
+@pytest.mark.parametrize("prelude", ["picocalc.gfx3d = nil", "picocalc.gfx3d.drawList = nil",
+                                     "require = nil", "picocalc.sys.getTimeUs = nil"])
+def test_old_firmware_gets_a_message(novarail, prelude):
+    # Firmware missing what the game needs: the app must explain, not raise.
+    sim, _ = novarail(prelude=prelude)
     sim.launch_app(APP)
-    time.sleep(2)
-    png = sim.screenshot()
-    assert colours(png, (0, 120, 320, 200)) >= 2, "no message on screen"
+    # The launch applies the app's 300 MHz clock first (a few seconds in the
+    # simulator); the message page is white text on black. A blank black
+    # frame on the way (launcher gone, text not yet drawn) is not the page.
+    deadline = time.monotonic() + 10
+    while True:
+        png = sim.screenshot()
+        if (colours(png, (0, 0, 320, 320)) <= 3
+                and colours(png, (0, 120, 320, 200)) >= 2):
+            break
+        assert time.monotonic() < deadline, "no message page"
+        time.sleep(0.25)
     sim.keypress("enter")
     res = sim.wait_for_exit(timeout=10)
     assert res["result"] == "returned", res

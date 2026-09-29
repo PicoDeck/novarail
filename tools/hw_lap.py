@@ -4,9 +4,8 @@
     python3 tools/hw_lap.py --device /dev/serial/by-id/usb-Raspberry_Pi_PicoDeck_Device_<serial>-if00
 
 1. Reboots the device (a fresh heap), pushes Nova Rail plus generated bench
-   audio (a looping 22.05 kHz mono WAV and six looping voices; two pushes,
-   each under ~250 KB, because push_app's unzip timeout assumes ~64 KB/s
-   and the SD card writes ~12 KB/s).
+   audio (a looping 22.05 kHz mono WAV and six looping voices), in two
+   pushes that share one app.json.
 2. Writes dev.json (autolap, `--laps`, bench_audio), resets `audiostat` and
    launches the app.
 3. Sends NOTHING while the race runs: the device answers every dev command
@@ -48,7 +47,7 @@ SFX_HZ = (523, 659, 784, 1047, 1319, 1568)
 GATE_MISSED = 0
 GATE_INTERVAL_P95_US = 34000
 GATE_ISR_MAX_US = 2400
-WORK_P95_TARGET_US = 25000  # headroom P4 needs; reported, not gated
+WORK_P95_TARGET_US = 24000  # headroom P4b and P5 need at 300 MHz; reported, not gated
 
 
 def stage(dest: Path):
@@ -99,13 +98,18 @@ def audiostat(t, arg=""):
     raise RuntimeError(f"no Audio reply to 'audiostat {arg}': {lines}")
 
 
-def measured_run(t, race_s: float, sleep=time.sleep) -> dict:
+def measured_run(t, race_s: float, sleep=time.sleep, warn=print) -> dict:
     """Launch and wait out the race with no dev command in between; returns
-    the `audiostat` whose window spans the whole race."""
+    the `audiostat` whose window spans the whole race. If the app is still
+    running after race_s, the polls that follow land in the race and stall
+    it (warned: raise race_s)."""
     audiostat(t, "reset")
     t.launch_app(APP)
     sleep(race_s)
-    t.wait_for_exit(timeout=120)
+    if t.status().get("app") not in (None, "launcher"):
+        warn(f"WARN: still racing after {race_s} s: exit polls now land in the race "
+             "and stall it (raise --race-s)")
+    t.wait_for_exit(timeout=180)
     return audiostat(t)
 
 
@@ -116,6 +120,8 @@ def verdict(perf: dict, audio) -> list:
         return ["perf.json has no frame log (the race ended before the warm-up)"]
     if perf["missed"] > GATE_MISSED:
         fails.append(f"{perf['missed']} frames missed the 33 333 us deadline")
+    if perf.get("late", 0) > GATE_MISSED:
+        fails.append(f"{perf['late']} frames were shown late (interval > 34 000 us)")
     if perf["interval_us"]["p95"] > GATE_INTERVAL_P95_US:
         fails.append(f"frame interval p95 {perf['interval_us']['p95']} us > {GATE_INTERVAL_P95_US}")
     if audio is not None and audio.get("isr_max_us", 0) >= GATE_ISR_MAX_US:
@@ -123,20 +129,31 @@ def verdict(perf: dict, audio) -> list:
     return fails
 
 
+def write_report(reports: Path, stamp: str, report: dict):
+    reports.mkdir(exist_ok=True)
+    (reports / f"hw_lap-{stamp}.json").write_text(json.dumps(report, indent=2))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--device", required=True, help="/dev/serial/by-id/... of the PicoCalc")
     ap.add_argument("--laps", type=int, default=2)
+    ap.add_argument("--rivals", type=int, default=5)
+    ap.add_argument("--race-s", type=float, default=None,
+                    help="seconds to wait before polling for the exit (default 40 per lap + 25)")
     ap.add_argument("--no-audio", action="store_true", help="skip the bench audio")
     ap.add_argument("--picodeck", default=os.environ.get(
         "PICODECK_ROOT", str(Path.home() / "Projects" / "PicoDeck" / "picodeck")))
     args = ap.parse_args()
     audio_on = not args.no_audio
+    race_s = args.race_s if args.race_s is not None else 40 * args.laps + 25
     sys.path.insert(0, str(Path(args.picodeck) / "tests" / "e2e"))
     from hw_target import HwTarget
 
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    reports = REPO / "reports"
     t = HwTarget(args.device).connect()
-    audio = None
+    perf, stats, shot = None, None, None
     try:
         t.reboot()
         with tempfile.TemporaryDirectory() as tmp:
@@ -154,50 +171,53 @@ def main():
                 for i, hz in enumerate(SFX_HZ, 1):
                     sfx_wav(app / "bench" / f"sfx{i}.wav", hz)
                 t.push_app(app, APP)
-        dev = {"autolap": True, "laps": args.laps, "bench_audio": audio_on}
+        dev = {"autolap": True, "laps": args.laps, "rivals": args.rivals, "bench_audio": audio_on}
         t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(dev).encode())
         t.delete_file(f"/data/{APP_ID}/perf.json")
 
-        stats = measured_run(t, race_s=40 * args.laps + 8)
-        audio = stats if audio_on else None
+        stats = measured_run(t, race_s=race_s)
         perf = json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
+        # The measurement is saved before anything else can fail.
+        write_report(reports, stamp, {"perf": perf, "audiostat": stats, "laps": args.laps,
+                                      "rivals": args.rivals, "bench_audio": audio_on})
 
         # A second, short run for the screenshot.
         t.write_file(f"/data/{APP_ID}/dev.json",
-                     json.dumps({"autolap": True, "laps": 1}).encode())
+                     json.dumps({"autolap": True, "laps": 1, "rivals": args.rivals}).encode())
         t.launch_app(APP)
-        time.sleep(10)
+        time.sleep(12)
         shot = t.screenshot()
         t.exit_app()
         t.wait_for_exit(timeout=30)
-        # A normal launch from the launcher must race, not autolap.
-        t.delete_file(f"/data/{APP_ID}/dev.json")
     finally:
+        # A normal launch from the launcher must race, not autolap.
+        try:
+            t.delete_file(f"/data/{APP_ID}/dev.json")
+        except Exception as e:
+            print(f"WARN: could not delete dev.json ({e}); the next launch will autolap")
         t.close()
 
+    audio = stats if audio_on else None
     fails = verdict(perf, audio)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    reports = REPO / "reports"
-    reports.mkdir(exist_ok=True)
-    report = {"perf": perf, "audiostat": stats, "gate_failures": fails,
-              "laps": args.laps, "bench_audio": audio_on}
-    (reports / f"hw_lap-{stamp}.json").write_text(json.dumps(report, indent=2))
-    (reports / f"hw_lap-{stamp}.png").write_bytes(shot)
+    write_report(reports, stamp, {"perf": perf, "audiostat": stats, "gate_failures": fails,
+                                  "laps": args.laps, "rivals": args.rivals, "bench_audio": audio_on})
+    if shot:
+        (reports / f"hw_lap-{stamp}.png").write_bytes(shot)
 
     w, i = perf.get("work_us", {}), perf.get("interval_us", {})
-    print(f"laps {perf.get('laps')} lap_ms {perf.get('lap_ms')} frames logged {perf.get('logged')}")
+    print(f"laps {perf.get('laps')} lap_ms {perf.get('lap_ms')} frames logged {perf.get('logged')}"
+          f" rivals {perf.get('rivals')}")
     print(f"work_us     min {w.get('min')} avg {w.get('avg')} p95 {w.get('p95')} max {w.get('max')}"
-          f"  (P4 headroom target p95 <= {WORK_P95_TARGET_US})")
+          f"  (headroom target p95 <= {WORK_P95_TARGET_US})")
     print(f"interval_us min {i.get('min')} avg {i.get('avg')} p95 {i.get('p95')} max {i.get('max')}"
-          f"  missed {perf.get('missed')}")
+          f"  missed {perf.get('missed')} late {perf.get('late')}")
+    print(f"sections {perf.get('sections')}")
     print(f"gfx3d {perf.get('gfx3d')}")
     print(f"audiostat {stats}")
-    # The WAV music plays through the stream ring: over 0.1 s of it missing
-    # is audible (a few hundred frames at the start, before it fills, is not).
-    if audio_on and stats.get("stream_underruns", 0) > 4410:
-        print(f"WARN: {stats['stream_underruns']} stream frames underran during the race")
+    if audio_on and (perf.get("music_underrun_frames") or 0) > 0:
+        print(f"WARN: the music underran in {perf['music_underrun_frames']} frames")
     if w.get("p95", 0) > WORK_P95_TARGET_US:
-        print(f"WARN: work p95 {w.get('p95')} us leaves less than P4's headroom")
+        print(f"WARN: work p95 {w.get('p95')} us leaves less headroom than the target")
     print(f"report: reports/hw_lap-{stamp}.json")
     if fails:
         print("GATE FAIL: " + "; ".join(fails))

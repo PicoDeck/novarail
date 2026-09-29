@@ -5,8 +5,10 @@ local M = {}
 
 local floor, ceil = math.floor, math.ceil
 
--- A frame whose work runs past the deadline misses it.
+-- A frame whose work runs past the deadline misses it; an interval longer
+-- than LATE_US means a frame was shown late, whatever the cause.
 M.DEADLINE_US = 33333
+M.LATE_US = 34000
 
 function M.new(capacity)
     local log = { n = 0, cap = capacity, work = {}, interval = {} }
@@ -37,11 +39,12 @@ function M.stats(values, n)
 end
 
 function M.summary(log)
-    local missed = 0
+    local missed, late = 0, 0
     for i = 1, log.n do
         if log.work[i] > M.DEADLINE_US then missed = missed + 1 end
+        if log.interval[i] > M.LATE_US then late = late + 1 end
     end
-    return { frames = log.n, missed = missed,
+    return { frames = log.n, missed = missed, late = late,
         work_us = M.stats(log.work, log.n),
         interval_us = M.stats(log.interval, log.n) }
 end

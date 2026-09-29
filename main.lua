@@ -1,9 +1,9 @@
 -- Nova Rail: an anti-gravity racer for PicoDeck.
 local pc = picocalc
 
--- Firmware before 0.5.0 has no gfx3d, require or getTimeUs: say so, rather
--- than fail with a Lua error.
-if not pc.gfx3d or type(require) ~= "function" or not pc.sys.getTimeUs then
+-- Firmware before 0.5.0 has no gfx3d (or gfx3d.drawList), require or
+-- getTimeUs: say so, rather than fail with a Lua error.
+if not (pc.gfx3d and pc.gfx3d.drawList) or type(require) ~= "function" or not pc.sys.getTimeUs then
     local d = pc.display
     d.clear(d.BLACK)
     d.drawText(16, 136, "Nova Rail needs PicoDeck", d.WHITE)

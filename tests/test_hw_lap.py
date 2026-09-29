@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import hw_lap  # noqa: E402
 
-PERF_OK = {"logged": 1100, "missed": 0,
+PERF_OK = {"logged": 1100, "missed": 0, "late": 0,
            "interval_us": {"min": 33000, "avg": 33333, "p95": 33500, "max": 34100},
            "work_us": {"min": 9000, "avg": 14000, "p95": 18000, "max": 24000}}
 
@@ -83,9 +83,32 @@ def test_gate_sends_nothing_mid_race():
         def wait_for_exit(self, timeout):
             calls.append(("exit", None))
 
+        def status(self):
+            calls.append(("status", None))
+            return {"app": "launcher"}
+
     stats = hw_lap.measured_run(Fake(), race_s=5, sleep=lambda s: calls.append(("sleep", s)))
     kinds = [c[0] for c in calls]
     launch, exit_ = kinds.index("launch"), kinds.index("exit")
     assert "cmd" not in kinds[launch:exit_], calls
     assert calls[0] == ("cmd", "audiostat reset") and calls[-1] == ("cmd", "audiostat")
     assert stats["isr_max_us"] == 1
+
+
+def test_verdict_fails_late_frames():
+    perf = dict(PERF_OK, late=2)
+    assert any("late" in f for f in hw_lap.verdict(perf, None))
+
+
+def test_measured_run_warns_when_the_race_outlasts_the_wait():
+    warnings = []
+
+    class Fake:
+        def command(self, cmd, timeout=None):
+            return ["[DEV] Audio: isr_max_us=1"]
+        def launch_app(self, name): pass
+        def wait_for_exit(self, timeout): pass
+        def status(self): return {"app": "Nova Rail"}
+
+    hw_lap.measured_run(Fake(), race_s=1, sleep=lambda s: None, warn=warnings.append)
+    assert warnings and "still racing" in warnings[0]

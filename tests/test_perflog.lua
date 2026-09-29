@@ -25,6 +25,16 @@ return {
         T.eq(s.frames, 3); T.eq(s.missed, 1)
         T.eq(s.work_us.max, 33334); T.eq(s.interval_us.min, 33333)
     end,
+    summary_counts_late_intervals = function()
+        -- a frame can finish its work in time and still be shown late (a stall
+        -- in the flush or between frames): the interval catches it
+        local log = perflog.new(4)
+        perflog.add(log, 20000, 33333)
+        perflog.add(log, 20000, 34001)
+        perflog.add(log, 20000, 40000)
+        local s = perflog.summary(log)
+        T.eq(s.missed, 0); T.eq(s.late, 2)
+    end,
     add_stops_when_full = function()
         local log = perflog.new(2)
         T.eq(perflog.add(log, 1, 1), true); T.eq(perflog.add(log, 2, 2), true)

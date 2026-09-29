@@ -5,7 +5,9 @@ ships on a banked, hilly track, drawn with `picocalc.gfx3d`. This is the
 greybox build (phase P3): one track, one ship, flat colours, and a locked
 30 fps on the PicoCalc.
 
-Needs PicoDeck firmware 0.5.0 or newer (gfx3d, `require`, `sys.getTimeUs`).
+Needs PicoDeck firmware 0.5.0 or newer (gfx3d with `drawList`, `require`,
+`sys.getTimeUs`). It runs the CPU at 300 MHz (`system_clock_khz` in
+`app.json`): a race of six ships needs the headroom.
 
 ## Controls
 
