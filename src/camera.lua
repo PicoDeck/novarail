@@ -25,11 +25,40 @@ function M.new()
         ux = 0, uy = 1, uz = 0, ox = 0, oy = 0, oz = 0, fov = M.FOV, ready = false }
 end
 
--- The ship's world position and forward vector (heading psi off the track).
+-- The ship's world position, forward vector (heading psi off the track)
+-- and up vector. Lerps the ring frames without renormalising: neighbouring
+-- rings differ by a few degrees, so the vectors are within 0.5% of unit
+-- length, and gfx3d.drawBasis normalises them anyway. It runs for every
+-- ship in view every frame, so it avoids track.frame's extra work.
 function M.ship_pose(tr, s)
-    local px, py, pz, tx, ty, tz, ux, uy, uz, rx, ry, rz = track.frame(tr, s.seg, s.t)
-    local c, sn = cos(s.psi), sin(s.psi)
-    return px + rx * s.u + ux * s.h, py + ry * s.u + uy * s.h, pz + rz * s.u + uz * s.h,
+    local seg, t = s.seg, s.t
+    local j, f = seg % tr.n + 1, 1 - t
+    local a = tr.px
+    local px = a[seg] * f + a[j] * t
+    a = tr.py
+    local py = a[seg] * f + a[j] * t
+    a = tr.pz
+    local pz = a[seg] * f + a[j] * t
+    a = tr.tx
+    local tx = a[seg] * f + a[j] * t
+    a = tr.ty
+    local ty = a[seg] * f + a[j] * t
+    a = tr.tz
+    local tz = a[seg] * f + a[j] * t
+    a = tr.ux
+    local ux = a[seg] * f + a[j] * t
+    a = tr.uy
+    local uy = a[seg] * f + a[j] * t
+    a = tr.uz
+    local uz = a[seg] * f + a[j] * t
+    a = tr.rx
+    local rx = a[seg] * f + a[j] * t
+    a = tr.ry
+    local ry = a[seg] * f + a[j] * t
+    a = tr.rz
+    local rz = a[seg] * f + a[j] * t
+    local c, sn, u, h = cos(s.psi), sin(s.psi), s.u, s.h
+    return px + rx * u + ux * h, py + ry * u + uy * h, pz + rz * u + uz * h,
         tx * c + rx * sn, ty * c + ry * sn, tz * c + rz * sn, ux, uy, uz
 end
 
