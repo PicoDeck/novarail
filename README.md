@@ -60,8 +60,8 @@ with all its music for playing (`--install`) and measures battery drain
 - `"autolap": true`: the AI drives the player's ship too; the app exits when the
   race reaches its results and writes `perf.json` (frame work and interval
   min/avg/p95/max, missed and late frames, per-section timings, the player's
-  lap times, the finishing order, gfx3d stats, the battery level at the start
-  and the end).
+  lap times, the finishing order, gfx3d stats, the battery level and USB power
+  at the start and the end, and what audio was playing when the race ended).
 - `"stay": true` (with autolap): show the results page and wait for a key
   instead of exiting.
 - `"laps": n`: race length (default 3, or 1 with autolap).

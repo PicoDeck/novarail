@@ -86,11 +86,17 @@ local function loading(text)
     disp.flush()
 end
 
--- The perf.json summary of a logged run. bat0 is the battery level at the
--- start (-1 on USB power).
-local function summary(log, g, sec, r, ships, bench, frames, bat0)
-    local out = { laps = #r.times[1], lap_ms = {}, frames = frames, bench_sfx = bench ~= nil,
-        battery = { start = bat0, finish = sys.getBattery() },
+-- The perf.json summary of a logged run. bat0 and usb0 are the battery level
+-- and USB power at the start (the level reads -1 only before the first
+-- reading). `audio` records what was playing at the end, so the gate can
+-- tell a run with audio from a silent one.
+local function summary(log, g, sec, r, ships, env, frames, bat0, usb0)
+    local music, eng = false, false
+    if env.sound then music, eng = audio.playing(env.sound) end
+    local out = { laps = #r.times[1], lap_ms = {}, frames = frames, bench_sfx = env.bench ~= nil,
+        battery = { start = bat0, finish = sys.getBattery(), usb_start = usb0,
+            usb_finish = sys.isUSBPowered() },
+        audio = { music = music, engine = eng, voices = env.bench and #env.bench or 0 },
         rivals = #ships - 1, results = {} }
     for k, lt in ipairs(r.times[1]) do out.lap_ms[k] = race.ms(lt) end
     for _, row in ipairs(race.results(r, r.tr, ships)) do
@@ -131,6 +137,7 @@ local function race_once(env)
     local P, dt, now = physics.P, 1 / M.FPS, sys.getTimeUs
     local frame, prev_t0, work = 0, nil, 0
     local bat0 = sys.getBattery()
+    local usb0 = sys.isUSBPowered()
 
     if env.sound then audio.start_race(env.sound) end
     hud.reset(h)
@@ -221,7 +228,7 @@ local function race_once(env)
         disp.flush()
     end
     perf.setTargetFPS(0)
-    if env.auto and not env.stay then return "quit", summary(log, g, sec, r, ships, env.bench, frame, bat0) end
+    if env.auto and not env.stay then return "quit", summary(log, g, sec, r, ships, env, frame, bat0, usb0) end
 
     if env.sound then audio.quiet(env.sound) end
     hud.reset(h)

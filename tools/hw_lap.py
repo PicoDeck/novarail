@@ -195,14 +195,32 @@ def verdict(perf: dict, audio) -> list:
     return fails
 
 
+def audio_failures(perf: dict) -> list:
+    """Gate failures for a run meant to play the game's audio and the bench
+    voices, from what perf.json says was playing when the race ended."""
+    a = perf.get("audio") or {}
+    fails = []
+    if not a.get("music"):
+        fails.append("the music was not playing when the race ended")
+    if not a.get("engine"):
+        fails.append("the engine note was not playing when the race ended")
+    if a.get("voices", 0) < len(SFX_HZ):
+        fails.append(f"{a.get('voices', 0)} of {len(SFX_HZ)} bench voices played")
+    return fails
+
+
 def soak_summary(perf: dict, clock_khz) -> tuple:
     """A battery run's result: (one line, report dict). The battery level
     reads -1 on USB power."""
     bat = perf.get("battery") or {}
     start, finish = bat.get("start", -1), bat.get("finish", -1)
-    minutes = perf.get("frames", 0) / 30 / 60
+    interval = (perf.get("interval_us") or {}).get("avg") or 33333
+    minutes = perf.get("frames", 0) * interval / 60e6
     report = {"clock_khz": clock_khz, "minutes": round(minutes, 1), "battery": bat,
               "laps": perf.get("laps")}
+    if bat.get("usb_start") or bat.get("usb_finish"):
+        return ("on USB power at the race's start or end: unplug the cable before "
+                "launching, and plug it back in only after the race", report)
     if start < 0 or finish < 0 or minutes <= 0:
         return (f"no battery reading (start {start}, finish {finish}): was the cable "
                 "unplugged for the whole race?", report)
@@ -265,6 +283,8 @@ def gate(args, audio: str):
         t.close()
 
     fails = verdict(perf, stats if audio != "none" else None)
+    if audio != "none":
+        fails += audio_failures(perf)
     write_report(reports, f"hw_lap-{stamp}", {"perf": perf, "audiostat": stats,
                                               "gate_failures": fails, "laps": args.laps,
                                               "rivals": args.rivals, "audio": audio,
@@ -319,8 +339,9 @@ def soak_stage(args, audio: str):
         t.close()
     clock = args.clock or json.loads((REPO / "app.json").read_text()).get("system_clock_khz")
     print(f"Armed: a {laps}-lap race (about {laps * LAP_S / 60:.0f} min) at {clock} kHz.")
-    print("Unplug the USB cable, launch Nova Rail from the launcher, and plug the")
-    print("cable back in once it is back at the launcher. Then run --soak-read.")
+    print("Unplug the USB cable, wait 10 s (the level is read every 5 s), launch Nova")
+    print("Rail from the launcher, and plug the cable back in once it is back at the")
+    print("launcher. Then run --soak-read.")
 
 
 def soak_read(args):

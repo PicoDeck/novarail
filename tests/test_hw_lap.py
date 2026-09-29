@@ -248,3 +248,28 @@ def test_measured_run_warns_when_the_race_outlasts_the_wait():
 
     hw_lap.measured_run(Fake(), race_s=1, sleep=lambda s: None, warn=warnings.append)
     assert warnings and "still racing" in warnings[0]
+
+
+def test_audio_failures_pass_a_run_with_everything_playing():
+    assert hw_lap.audio_failures({"audio": {"music": True, "engine": True, "voices": 6}}) == []
+
+
+def test_audio_failures_name_what_did_not_play():
+    fails = hw_lap.audio_failures({"audio": {"music": False, "engine": True, "voices": 5}})
+    assert len(fails) == 2, fails
+    assert any("music" in f for f in fails) and any("5 of 6" in f for f in fails)
+    assert len(hw_lap.audio_failures({})) == 3, "a perf.json without the record fails"
+
+
+def test_soak_summary_refuses_a_run_on_usb_power():
+    perf = {"frames": 30 * 60 * 12, "battery": {"start": 90, "finish": 84,
+                                              "usb_start": False, "usb_finish": True}}
+    line, report = hw_lap.soak_summary(perf, 300000)
+    assert "USB" in line and "percent_per_hour" not in report
+
+
+def test_soak_minutes_come_from_the_measured_frame_interval():
+    perf = {"frames": 30 * 60 * 12, "interval_us": {"avg": 40000},
+            "battery": {"start": 90, "finish": 84}}
+    _, report = hw_lap.soak_summary(perf, 200000)
+    assert report["minutes"] == 14.4

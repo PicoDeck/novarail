@@ -105,8 +105,11 @@ def test_autolap_writes_perf_json(novarail):
         assert set(perf[key]) == {"min", "avg", "p95", "max"}, perf[key]
     assert perf["gfx3d"]["drawn_avg"] > 50, perf["gfx3d"]
     assert perf["bench_sfx"] is False
-    assert set(perf["battery"]) == {"start", "finish"}, perf["battery"]
-    assert all(isinstance(v, int) for v in perf["battery"].values()), perf["battery"]
+    bat = perf["battery"]
+    assert set(bat) == {"start", "finish", "usb_start", "usb_finish"}, bat
+    assert isinstance(bat["start"], int) and isinstance(bat["finish"], int), bat
+    assert isinstance(bat["usb_start"], bool) and isinstance(bat["usb_finish"], bool), bat
+    assert perf["audio"] == {"music": False, "engine": False, "voices": 0}, perf["audio"]
     assert isinstance(perf["late"], int)
     assert set(perf["sections"]) == {"input", "sim", "camera", "draw", "hud"}
     assert perf["rivals"] == 5
@@ -252,3 +255,17 @@ def test_bench_sfx_play_over_the_music(novarail):
     state = sim.call("get_audio_state")
     assert state["sound_players_active"] == 0, state
     assert not lua_errors(sim)
+
+
+def test_autolap_records_what_audio_played(novarail):
+    assets = dict(audio_assets())
+    for i in range(1, 7):
+        assets[f"bench/sfx{i}.wav"] = wav_bytes(0.5, 400 + 100 * i)
+    sim, data = novarail(dev={"autolap": True, "laps": 1, "rivals": 0, "bench_sfx": True},
+                         assets=assets)
+    sim.launch_app(APP)
+    res = sim.wait_for_exit(timeout=150)
+    assert res["result"] == "returned", res
+    assert not lua_errors(sim)
+    perf = json.loads((data / "perf.json").read_text())
+    assert perf["audio"] == {"music": True, "engine": True, "voices": 6}, perf["audio"]
