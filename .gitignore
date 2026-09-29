@@ -3,3 +3,5 @@ reports/
 .worktrees/
 __pycache__/
 .pytest_cache/
+assets/music/
+assets/sfx/

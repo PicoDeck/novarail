@@ -28,6 +28,10 @@ Thrust is automatic: the keyboard reports at most three keys at once.
 - `data/`: track definitions.
 - `tests/`: host tests (`tests/run.lua`).
 - `tools/build_lua32.sh`: host Lua with the device's 32-bit numbers.
+- `assets/src/`: the audio sources; `make assets` (`tools/prep_audio.sh`,
+  needs ffmpeg and [qoaconv](https://github.com/phoboslab/qoa)) turns them into
+  `assets/music/track*.qoa` (44.1 kHz stereo QOA, streamed by a fileplayer)
+  and `assets/sfx/engine.wav`. Without them the game runs silent.
 
 ## Tests
 
