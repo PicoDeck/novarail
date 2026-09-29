@@ -32,10 +32,13 @@ return {
         T.near(x, wx, 0.05); T.near(y, wy, 0.05); T.near(z, wz, 0.05)
         local fl = math.sqrt(fx * fx + fy * fy + fz * fz)
         T.near(fl, 1, 0.01, "forward is near unit length")
-        local _, _, _, tx, ty, tz, _, _, _, rx, ry, rz = track.frame(tr, 123, 0.37)
+        local _, _, _, tx, ty, tz, wux, wuy, wuz, rx, ry, rz = track.frame(tr, 123, 0.37)
         local want = { tx * math.cos(0.2) + rx * math.sin(0.2), ty * math.cos(0.2) + ry * math.sin(0.2),
             tz * math.cos(0.2) + rz * math.sin(0.2) }
         T.near(fx / fl, want[1], 0.01); T.near(fy / fl, want[2], 0.01); T.near(fz / fl, want[3], 0.01)
+        local ul = math.sqrt(ux * ux + uy * uy + uz * uz)
+        T.near(ul, 1, 0.01, "up is near unit length")
+        T.near(ux / ul, wux, 0.01); T.near(uy / ul, wuy, 0.01); T.near(uz / ul, wuz, 0.01)
     end,
     fov_widens_with_speed_and_caps = function()
         local tr = F.track1()
