@@ -41,8 +41,7 @@ local function field(c, key, x, y, text, fg)
     end
 end
 
--- st: { v, lap, laps, pos, n, lap_ms, last_ms, best_ms, energy (0..100),
--- fps, work_us }.
+-- st: { v, lap, laps, pos, n, lap_ms, last_ms, best_ms, energy (0..100) }.
 function M.draw(h, st)
     local c = h.cache[h.frame % 2 + 1]
     h.frame = h.frame + 1
@@ -58,7 +57,6 @@ function M.draw(h, st)
         field(c, "time", 8, Y + 54, "TIME " .. fmt.time(st.lap_ms), FG)
         field(c, "last", 168, Y + 6, "LAST " .. fmt.time(st.last_ms), DIM)
         field(c, "best", 168, Y + 22, "BEST " .. fmt.time(st.best_ms), DIM)
-        field(c, "perf", 168, Y + 60, string.format("%2d fps %4.1f ms", st.fps, st.work_us / 1000), DIM)
         c.fresh = true
     end
     local e = st.energy

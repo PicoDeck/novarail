@@ -202,7 +202,6 @@ local function race_once(env)
         elseif race.can_drive(r) then hs.lap_ms = race.ms(r.frame - r.lap_start[1])
         else hs.lap_ms = 0 end
         hs.last_ms, hs.best_ms = race.ms(r.last[1]), race.ms(r.best[1])
-        hs.fps, hs.work_us = perf.getFPS(), work
         hud.draw(h, hs)
         if env.sound then audio.update(env.sound, me.v, frame) end
 
