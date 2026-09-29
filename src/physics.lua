@@ -1,7 +1,9 @@
 -- Ship physics in track space (pure Lua). A ship is a place on the track
 -- (seg, t), a lateral offset u (metres, + = right), a hover height h over
 -- the surface with its rate vh, a speed v (m/s) and a heading psi relative
--- to the track (radians, + = right). One call steps one fixed dt.
+-- to the track (radians, + = right), and an energy store that walls and
+-- collisions drain and the recharge strip refills; at zero the ship is out
+-- of the race (dnf) and gets no more thrust. One call steps one fixed dt.
 local track = require("src.track")
 
 local M = {}
@@ -29,29 +31,41 @@ M.P = {
     H_MIN = 0.35,      -- m: the hull never goes lower
     PAD_KICK = 12,     -- m/s added by a speed pad (once per pad)
     V_BOOST = 85,      -- m/s: a pad never lifts the speed above this
+    ENERGY = 100,      -- a full energy store
+    WALL_DAMAGE = 1.2, -- energy lost per m/s of speed a wall takes
+    RECHARGE = 15,     -- energy per second on the recharge strip
 }
 
 function M.new_ship(seg, t, u)
     return { seg = seg or 1, t = t or 0, u = u or 0, h = M.P.HOVER_H, vh = 0,
-        v = 0, psi = 0, lap = 0, laps = 0, hit = false, pad = 0, air = false }
+        v = 0, psi = 0, lap = 0, laps = 0, hit = false, pad = 0, air = false,
+        energy = M.P.ENERGY, dnf = false, impact = 0 }
 end
 
--- c = { steer = -1..1 (+ = right), thrust, brake, abL, abR }. Sets s.hit
--- (touched a wall this step), s.pad (id of the pad under the ship, or 0),
--- s.air (above hover range) and s.laps (start-line crossings this step).
+-- c = { steer = -1..1 (+ = right), thrust, brake, abL, abR, thrust_scale }.
+-- Sets s.hit (touched a wall this step), s.impact (speed the wall took),
+-- s.pad (id of the pad under the ship, or 0), s.air (above hover range) and
+-- s.laps (start-line crossings this step).
 function M.step(tr, s, c, dt)
     local P = M.P
     local seg, t = s.seg, s.t
-    local ty = track.lerp(tr.ty, tr, seg, t)
-    local uy = track.lerp(tr.uy, tr, seg, t)
-    local kr = track.lerp(tr.kr, tr, seg, t)
-    local ku = track.lerp(tr.ku, tr, seg, t)
-    local w = track.lerp(tr.w, tr, seg, t)
+    -- per-ring values at (seg, t), lerped inline (this runs 7 times a frame)
+    local j, f = seg % tr.n + 1, 1 - t
+    local arr = tr.ty
+    local ty = arr[seg] * f + arr[j] * t
+    arr = tr.uy
+    local uy = arr[seg] * f + arr[j] * t
+    arr = tr.kr
+    local kr = arr[seg] * f + arr[j] * t
+    arr = tr.ku
+    local ku = arr[seg] * f + arr[j] * t
+    arr = tr.w
+    local w = arr[seg] * f + arr[j] * t
     local v, psi, h, vh = s.v, s.psi, s.h, s.vh
     local air = h >= P.HOVER_RANGE
 
     local a = -P.DRAG * v * v - P.ROLL * v - P.G * ty
-    if c.thrust and not air then a = a + P.THRUST end
+    if c.thrust and not air and not s.dnf then a = a + P.THRUST * (c.thrust_scale or 1) end
     if c.brake then a = a - P.BRAKE end
     local abl, abr = c.abL and 1 or 0, c.abR and 1 or 0
     a = a - (abl + abr) * P.AB_DRAG * v
@@ -67,10 +81,11 @@ function M.step(tr, s, c, dt)
 
     local u = s.u + v * sin(psi) * dt
     local lim = w * 0.5 - P.SHIP_HALF_W
-    local hit = false
+    local hit, impact = false, 0
     if u > lim or u < -lim then
         u = u > 0 and lim or -lim
-        v = v * (1 - P.WALL_LOSS * abs(sin(psi)))
+        impact = v * P.WALL_LOSS * abs(sin(psi))
+        v = v - impact
         psi = -psi * P.WALL_BOUNCE
         hit = true
     end
@@ -95,8 +110,12 @@ function M.step(tr, s, c, dt)
         s.pad = 0
     end
 
+    local energy = s.energy - impact * P.WALL_DAMAGE
+    if tr.recharge[seg] and not s.dnf then energy = min(P.ENERGY, energy + P.RECHARGE * dt) end
+    if energy <= 0 then energy, s.dnf = 0, true end
+
     s.seg, s.t, s.u, s.h, s.vh, s.v, s.psi = seg, t, u, h, vh, v, psi
-    s.hit, s.air, s.laps = hit, h >= P.HOVER_RANGE, laps
+    s.hit, s.impact, s.air, s.laps, s.energy = hit, impact, h >= P.HOVER_RANGE, laps, energy
     s.lap = s.lap + laps
 end
 

@@ -3,7 +3,8 @@
 -- point, driving towards -z). bank is in radians: > 0 lowers the right edge,
 -- for a right-hand bend. The lap runs clockwise seen from above.
 -- Pads: `at` is the fraction of the lap where the pad starts, `u` its lateral
--- centre (metres, + = right) and `half` its half width.
+-- centre (metres, + = right) and `half` its half width. `recharge` is the
+-- energy-recharge strip, from and to as fractions of the lap.
 return {
     name = "Proving Ground",
     points = {
@@ -27,6 +28,7 @@ return {
         { -80, 0, 210, 24, 0.04 },
         { -40, 0, 90, 24, 0 },
     },
+    recharge = { from = 0.95, to = 0.02 }, -- the start straight
     pads = {
         { at = 0.07, u = 0, half = 4 },
         { at = 0.55, u = -5, half = 3 },

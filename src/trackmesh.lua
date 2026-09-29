@@ -11,7 +11,8 @@ M.GROUND_W = 40    -- m of ground beside each wall
 M.GROUND_DROP = 0.3 -- m: the ground sits this far below the road edge
 
 -- pal: colours (integers): road = {a, b} (alternating stripes), line (the
--- start segment), pad, wall = {a, b}, ground = {a, b}. double: the flag value
+-- start segment), pad, wall = {a, b}, ground = {a, b}, recharge = {a, b}
+-- (the recharge strip's stripes). double: the flag value
 -- for double-sided triangles (gfx3d.DOUBLE_SIDED), used on walls.
 -- Returns { chunks = { {first, last, road = {verts, tris, cols, flags},
 -- ground = {verts, tris, cols}}, ... }, of = {[seg] = chunk index} }.
@@ -73,6 +74,7 @@ function M.build(tr, pal, double)
             local seg, j = i, i + 1
             out.of[seg] = #out.chunks + 1
             local stripe = pal.road[seg % 2 + 1]
+            if tr.recharge[seg] then stripe = pal.recharge[seg % 2 + 1] end
             if seg == 1 then stripe = pal.line end
             local id = tr.padid[seg]
             if id then

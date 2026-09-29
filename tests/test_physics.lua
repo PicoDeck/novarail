@@ -109,6 +109,42 @@ return {
         T.ok(peak(80) > P.HOVER_H + 0.1, "80 m/s lifts over the crest: " .. peak(80))
         T.ok(peak(20) < P.HOVER_H + 0.05, "20 m/s stays down: " .. peak(20))
     end,
+    walls_cost_energy_by_the_speed_lost = function()
+        local s = physics.new_ship()
+        s.v = 50
+        local lost = 0
+        run(circle, s, { steer = 1 }, 2, function(st) lost = lost + st.impact end)
+        T.ok(lost > 0, "the wall took speed")
+        T.near(s.energy, P.ENERGY - lost * P.WALL_DAMAGE, 1e-2, "energy")
+    end,
+    no_energy_means_out_of_the_race = function()
+        local s = physics.new_ship()
+        s.v, s.energy = 50, 0.5
+        run(circle, s, { steer = 1, thrust = true }, 3)
+        T.eq(s.dnf, true); T.eq(s.energy, 0)
+        local v = s.v
+        run(circle, s, { steer = 0, thrust = true }, 3)
+        T.ok(s.v < v, "no thrust once out: " .. s.v)
+    end,
+    recharge_strip_restores_energy = function()
+        local tr = F.track1()
+        local seg
+        for i = 1, tr.n do if tr.recharge[i] then seg = i; break end end
+        T.ok(seg, "track 1 has a recharge strip")
+        local s = physics.new_ship(seg, 0, 0)
+        s.v, s.energy = 10, 50
+        physics.step(tr, s, { steer = 0 }, 1 / 60)
+        T.near(s.energy, 50 + P.RECHARGE / 60, 1e-3)
+        s.energy = P.ENERGY - 0.01
+        physics.step(tr, s, { steer = 0 }, 1 / 60)
+        T.eq(s.energy, P.ENERGY, "capped")
+    end,
+    thrust_scale_scales_the_push = function()
+        local a, b = physics.new_ship(), physics.new_ship()
+        run(circle, a, { steer = 0, thrust = true, thrust_scale = 1.1 }, 2)
+        run(circle, b, { steer = 0, thrust = true }, 2)
+        T.ok(a.v > b.v, "more thrust, more speed")
+    end,
     missing_steer_means_straight = function()
         local s = physics.new_ship()
         s.v = 30

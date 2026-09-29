@@ -103,6 +103,24 @@ local function frames(tr)
     tr.rx, tr.ry, tr.rz, tr.kr, tr.ku = rx, ry, rz, kr, ku
 end
 
+-- The recharge strip: def.recharge = { from, to }, fractions of the lap in
+-- [0, 1) (it may wrap past the start line). tr.recharge[seg] is true on it.
+local function place_recharge(tr, rc)
+    tr.recharge = {}
+    if not rc then return end
+    assert(type(rc) == "table" and finite(rc.from) and finite(rc.to)
+        and rc.from >= 0 and rc.from < 1 and rc.to >= 0 and rc.to < 1,
+        "trackgen: recharge needs `from` and `to` in [0, 1)")
+    local first = floor(rc.from * tr.n) % tr.n + 1
+    local last = floor(rc.to * tr.n) % tr.n + 1
+    local seg = first
+    while true do
+        tr.recharge[seg] = true
+        if seg == last then break end
+        seg = seg % tr.n + 1
+    end
+end
+
 -- Pads cover M.PAD_SEGS segments from floor(at * n) + 1. padid[seg] is the
 -- pad's index, padlo/padhi[seg] its lateral range.
 M.PAD_SEGS = 2
@@ -156,6 +174,7 @@ function M.generate(def, seg_len)
     end
     frames(tr)
     place_pads(tr, def.pads)
+    place_recharge(tr, def.recharge)
     return tr
 end
 

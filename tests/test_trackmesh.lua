@@ -3,7 +3,7 @@ local F = require("tests.fixtures")
 local trackmesh = require("src.trackmesh")
 
 -- Distinct colours, so a test can tell the triangle kinds apart.
-local PAL = { road = { 1, 2 }, line = 3, pad = 4, wall = { 5, 6 }, ground = { 7, 8 } }
+local PAL = { road = { 1, 2 }, line = 3, pad = 4, wall = { 5, 6 }, ground = { 7, 8 }, recharge = { 9, 10 } }
 local DOUBLE = 16
 
 local tr = F.track1()
@@ -66,7 +66,7 @@ return {
             each_tri(ch.road, function(v, a, b, c, col, flag)
                 local nx, ny, nz = normal(v, a, b, c)
                 local up = nx * tr.ux[r] + ny * tr.uy[r] + nz * tr.uz[r]
-                if col <= 4 then
+                if col <= 4 or col >= 9 then
                     T.ok(up > 0, "road faces up")
                     T.eq(flag, 0)
                 else
@@ -91,6 +91,20 @@ return {
         for seg = 1, tr.n do if tr.padid[seg] then pad_segs = pad_segs + 1 end end
         T.eq(pad_tris, 2 * pad_segs)
         T.eq(line_tris, 2 + (tr.padid[1] and 2 or 0))
+    end,
+    recharge_strip_has_its_own_colours = function()
+        for _, ch in ipairs(mesh.chunks) do
+            local v, t, c = ch.road[1], ch.road[2], ch.road[3]
+            for k = 1, #t // 3 do
+                -- which segment: the ring of the triangle's first vertex (4 per ring, first)
+                local ring = (t[3 * k - 2] - 1) // 4
+                local seg = ch.first + ring
+                if seg <= ch.last and c[k] <= 2 then
+                    T.ok(not tr.recharge[seg], "plain stripe on recharge segment " .. seg)
+                end
+                if c[k] >= 9 then T.ok(tr.recharge[seg] or tr.recharge[(seg - 2) % tr.n + 1], "recharge colour off the strip at " .. seg) end
+            end
+        end
     end,
     triangle_budget = function()
         local total = 0

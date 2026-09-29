@@ -22,6 +22,7 @@ local function palette()
         pad = rgb(40, 220, 240),
         wall = { rgb(210, 60, 70), rgb(235, 235, 235) },
         ground = { rgb(60, 120, 70), rgb(50, 102, 60) },
+        recharge = { rgb(200, 80, 200), rgb(170, 60, 180) },
     }
 end
 

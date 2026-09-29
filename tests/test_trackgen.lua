@@ -158,6 +158,24 @@ return {
             trackgen.generate(def_with(function(d) d.pads = { 7 } end), 8)
         end, "pad 1 is not a table")
     end,
+    recharge_strip_wraps_the_start_line = function()
+        T.ok(tr.recharge[1] and tr.recharge[tr.n], "covers both sides of the line")
+        local count = 0
+        for i = 1, tr.n do if tr.recharge[i] then count = count + 1 end end
+        T.ok(count > 10 and count < 30, "about 7% of the lap: " .. count)
+        T.ok(not tr.recharge[tr.n // 2], "not the far side")
+    end,
+    no_recharge_strip_is_fine = function()
+        local c = F.circle(300, 8)
+        T.eq(next(c.recharge), nil)
+    end,
+    rejects_a_bad_recharge_strip = function()
+        for _, rc in ipairs({ { from = 1, to = 0.1 }, { from = 0.2 }, 5 }) do
+            T.raises(function()
+                trackgen.generate(def_with(function(d) d.recharge = rc end), 8)
+            end, "recharge needs")
+        end
+    end,
     rejects_a_bad_segment_length = function()
         for _, len in ipairs({ 0, -8, math.huge, 0 / 0 }) do
             T.raises(function() trackgen.generate(F.circle_def(300, 8), len) end, "seg_len")
