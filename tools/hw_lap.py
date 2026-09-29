@@ -1,29 +1,41 @@
 #!/usr/bin/env python3
-"""The P3 hardware gate: autopilot laps at a locked 30 fps on a PicoCalc.
+"""The hardware gate: a race at a locked 30 fps on a PicoCalc.
 
     python3 tools/hw_lap.py --device /dev/serial/by-id/usb-Raspberry_Pi_PicoDeck_Device_<serial>-if00
 
-1. Reboots the device (a fresh heap), pushes Nova Rail plus generated bench
-   audio (a looping 22.05 kHz mono WAV and six looping voices), in two
-   pushes that share one app.json.
-2. Writes dev.json (autolap, `--laps`, bench_audio), resets `audiostat` and
-   launches the app.
+1. Reboots the device (a fresh heap) and pushes Nova Rail with the game's
+   own audio plus six bench voices (run `make assets` first): the engine
+   sample and bench/sfx1-6.wav (looping voices standing in for the effects
+   P4b and P5 add), then, in a second push with the same app.json, a
+   MUSIC_S excerpt of the race music (whole QOA frames: decoding costs the
+   same per second whatever the length, and the race loops it).
+2. Writes dev.json (autolap, `--laps`, `--rivals`, bench_sfx), resets
+   `audiostat` and launches the app.
 3. Sends NOTHING while the race runs: the device answers every dev command
    inside the app, which stalls it a few ms (enough to miss a deadline), so
    the tool sleeps through the expected race, then waits for the exit and
    reads `audiostat` (its window spans the whole race) and perf.json. No
    screenshot either: a transfer stalls Core 0 for seconds.
-4. Reads perf.json.
-5. Launches one more short autolap run for a screenshot (colour check),
+4. Launches one more short autolap run for a screenshot (colour check),
    then deletes dev.json so the next launch from the launcher is a race.
 
-Gate: no logged frame misses its 33 333 us deadline, the frame interval's
-p95 is at most 34 000 us, and the audio refill ISR's worst case stays
-under 2 400 us of its ~2 900 us period. Prints a verdict, writes
+Gate: no logged frame misses its 33 333 us deadline or is shown late, the
+frame interval's p95 is at most 34 000 us, and the audio refill ISR's worst
+case stays under 2 400 us of its ~2 900 us period. Prints a verdict, writes
 reports/hw_lap-<time>.json and .png, and exits 1 if the gate fails.
 
+Other modes:
+    --install            push the game with all its music, as a player gets
+                         it (no dev.json), for playing
+    --soak-stage MINUTES push and arm an autolap race of about MINUTES for a
+                         battery run: unplug the USB cable, launch Nova Rail,
+                         plug back in once it is back at the launcher, then
+    --soak-read          print the battery level at the race's start and end
+--clock KHZ sets system_clock_khz in the pushed app.json (default: the
+repo's).
+
 Nothing else may hold the serial port (stop the MCP server's log capture
-first). Needs ffmpeg for the bench music.
+first).
 """
 import argparse
 import json
@@ -32,7 +44,6 @@ import os
 import re
 import shutil
 import struct
-import subprocess
 import sys
 import tempfile
 import time
@@ -42,15 +53,24 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 APP, APP_ID = "novarail", "net.picodeck.novarail"
 APP_FILES = ("app.json", "main.lua", "src", "data")
+MUSIC = Path("assets/music/track01.qoa")
+ENGINE = Path("assets/sfx/engine.wav")
+MUSIC_S = 20
 SFX_HZ = (523, 659, 784, 1047, 1319, 1568)
+LAP_S = 40  # a lap takes about 37 s
 
 GATE_MISSED = 0
 GATE_INTERVAL_P95_US = 34000
 GATE_ISR_MAX_US = 2400
 WORK_P95_TARGET_US = 24000  # headroom P4b and P5 need at 300 MHz; reported, not gated
+# Output frames (44.1 kHz) the music stream may go without data before the
+# tool warns: 0.1 s is audible. Reported, not gated (PicoDeck issue #34).
+UNDERRUN_WARN_FRAMES = 4410
 
 
-def stage(dest: Path):
+def stage(dest: Path, clock_khz=None):
+    """The app's device files in dest; clock_khz replaces app.json's
+    system_clock_khz."""
     dest.mkdir(parents=True, exist_ok=True)
     for name in APP_FILES:
         src = REPO / name
@@ -59,21 +79,10 @@ def stage(dest: Path):
                             ignore=shutil.ignore_patterns("__pycache__"))
         else:
             shutil.copy(src, dest / name)
-
-
-def music_wav(path: Path, seconds: int = 5):
-    """A loopable chord well above the speaker's weak low end, as the game's
-    music will be: 16-bit WAV at 22.05 kHz mono (MP3 decoding on Core 1
-    slows the game's core; see PicoDeck's docs/API-Audio-and-Sound.md)."""
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        raise SystemExit("hw_lap: ffmpeg is needed for the bench music (or pass --no-audio)")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([ffmpeg, "-v", "error", "-y",
-                    "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
-                    "-f", "lavfi", "-i", f"sine=frequency=660:duration={seconds}",
-                    "-filter_complex", "amix=inputs=2", "-ac", "1", "-ar", "22050",
-                    "-c:a", "pcm_s16le", str(path)], check=True)
+    if clock_khz is not None:
+        manifest = json.loads((dest / "app.json").read_text())
+        manifest["system_clock_khz"] = clock_khz
+        (dest / "app.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 def sfx_wav(path: Path, hz: int, seconds: float = 0.5, rate: int = 22050):
@@ -86,6 +95,63 @@ def sfx_wav(path: Path, hz: int, seconds: float = 0.5, rate: int = 22050):
         w.writeframes(b"".join(
             struct.pack("<h", int(8000 * math.sin(2 * math.pi * hz * i / rate)))
             for i in range(frames)))
+
+
+def qoa_excerpt(data: bytes, seconds: float) -> bytes:
+    """The first `seconds` of a QOA file (at least one frame) as a QOA file:
+    whole frames from the front (each carries its own decoder state) and a
+    file header whose sample count matches them."""
+    if len(data) < 16 or data[:4] != b"qoaf":
+        raise ValueError("not a QOA file")
+    rate = int.from_bytes(data[9:12], "big")
+    want = max(1, int(seconds * rate))
+    out, pos, samples = bytearray(data[:8]), 8, 0
+    while samples < want and pos + 8 <= len(data):
+        fsamples, fsize = struct.unpack(">HH", data[pos + 4:pos + 8])
+        if fsize < 8 or pos + fsize > len(data):
+            break
+        out += data[pos:pos + fsize]
+        pos, samples = pos + fsize, samples + fsamples
+    if samples == 0:
+        raise ValueError("no whole QOA frame")
+    out[4:8] = struct.pack(">I", samples)
+    return bytes(out)
+
+
+def missing_assets(audio: str) -> list:
+    """The `make assets` outputs a push with this audio needs but the repo
+    lacks."""
+    need = [] if audio == "none" else [ENGINE, MUSIC]
+    return [str(p) for p in need if not (REPO / p).exists()]
+
+
+def push_game(t, clock_khz, audio: str):
+    """Push Nova Rail. audio: "none"; "bench" (the engine sample, the six
+    bench voices and a MUSIC_S music excerpt); or "full" (the engine sample
+    and every music track whole, as a player gets them). The music goes one
+    file per push, each with the first push's app.json (no second reboot)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        app = Path(tmp) / "app" / APP
+        stage(app, clock_khz)
+        if audio != "none":
+            (app / ENGINE).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(REPO / ENGINE, app / ENGINE)
+        if audio == "bench":
+            for i, hz in enumerate(SFX_HZ, 1):
+                sfx_wav(app / "bench" / f"sfx{i}.wav", hz)
+        t.push_app(app, APP)
+        tracks = []
+        if audio == "bench":
+            tracks = [(MUSIC, qoa_excerpt((REPO / MUSIC).read_bytes(), MUSIC_S))]
+        elif audio == "full":
+            tracks = [(p.relative_to(REPO), p.read_bytes())
+                      for p in sorted((REPO / MUSIC.parent).glob("*.qoa"))]
+        for k, (rel, data) in enumerate(tracks):
+            part = Path(tmp) / f"music{k}" / APP
+            (part / rel).parent.mkdir(parents=True)
+            shutil.copy(app / "app.json", part / "app.json")
+            (part / rel).write_bytes(data)
+            t.push_app(part, APP)
 
 
 def audiostat(t, arg=""):
@@ -129,9 +195,147 @@ def verdict(perf: dict, audio) -> list:
     return fails
 
 
-def write_report(reports: Path, stamp: str, report: dict):
+def soak_summary(perf: dict, clock_khz) -> tuple:
+    """A battery run's result: (one line, report dict). The battery level
+    reads -1 on USB power."""
+    bat = perf.get("battery") or {}
+    start, finish = bat.get("start", -1), bat.get("finish", -1)
+    minutes = perf.get("frames", 0) / 30 / 60
+    report = {"clock_khz": clock_khz, "minutes": round(minutes, 1), "battery": bat,
+              "laps": perf.get("laps")}
+    if start < 0 or finish < 0 or minutes <= 0:
+        return (f"no battery reading (start {start}, finish {finish}): was the cable "
+                "unplugged for the whole race?", report)
+    per_hour = (start - finish) / minutes * 60
+    report["percent_per_hour"] = round(per_hour, 1)
+    return (f"{clock_khz} kHz: battery {start}% -> {finish}% over {minutes:.1f} min "
+            f"({per_hour:.0f}%/h)", report)
+
+
+def write_report(reports: Path, name: str, report: dict):
     reports.mkdir(exist_ok=True)
-    (reports / f"hw_lap-{stamp}.json").write_text(json.dumps(report, indent=2))
+    (reports / f"{name}.json").write_text(json.dumps(report, indent=2))
+
+
+def connect(args):
+    sys.path.insert(0, str(Path(args.picodeck) / "tests" / "e2e"))
+    from hw_target import HwTarget
+    return HwTarget(args.device).connect()
+
+
+def disarm(t):
+    """A normal launch from the launcher must race, not autolap."""
+    try:
+        t.delete_file(f"/data/{APP_ID}/dev.json")
+    except Exception as e:
+        print(f"WARN: could not delete dev.json ({e}); the next launch will autolap")
+
+
+def gate(args, audio: str):
+    race_s = args.race_s if args.race_s is not None else LAP_S * args.laps + 25
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    reports = REPO / "reports"
+    t = connect(args)
+    perf, stats, shot = None, None, None
+    try:
+        t.reboot()
+        push_game(t, args.clock, audio)
+        dev = {"autolap": True, "laps": args.laps, "rivals": args.rivals,
+               "bench_sfx": audio != "none", "mute": audio == "none"}
+        t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(dev).encode())
+        t.delete_file(f"/data/{APP_ID}/perf.json")
+
+        stats = measured_run(t, race_s=race_s)
+        perf = json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
+        # The measurement is saved before anything else can fail.
+        write_report(reports, f"hw_lap-{stamp}", {"perf": perf, "audiostat": stats,
+                                                  "laps": args.laps, "rivals": args.rivals,
+                                                  "audio": audio, "clock_khz": args.clock})
+
+        # A second, short run for the screenshot.
+        t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(
+            {"autolap": True, "laps": 1, "rivals": args.rivals, "mute": audio == "none"}).encode())
+        t.launch_app(APP)
+        time.sleep(12)
+        shot = t.screenshot()
+        t.exit_app()
+        t.wait_for_exit(timeout=30)
+    finally:
+        disarm(t)
+        t.close()
+
+    fails = verdict(perf, stats if audio != "none" else None)
+    write_report(reports, f"hw_lap-{stamp}", {"perf": perf, "audiostat": stats,
+                                              "gate_failures": fails, "laps": args.laps,
+                                              "rivals": args.rivals, "audio": audio,
+                                              "clock_khz": args.clock})
+    if shot:
+        (reports / f"hw_lap-{stamp}.png").write_bytes(shot)
+
+    w, i = perf.get("work_us", {}), perf.get("interval_us", {})
+    print(f"laps {perf.get('laps')} lap_ms {perf.get('lap_ms')} frames logged {perf.get('logged')}"
+          f" rivals {perf.get('rivals')} audio {audio}")
+    print(f"work_us     min {w.get('min')} avg {w.get('avg')} p95 {w.get('p95')} max {w.get('max')}"
+          f"  (headroom target p95 <= {WORK_P95_TARGET_US})")
+    print(f"interval_us min {i.get('min')} avg {i.get('avg')} p95 {i.get('p95')} max {i.get('max')}"
+          f"  missed {perf.get('missed')} late {perf.get('late')}")
+    print(f"sections {perf.get('sections')}")
+    print(f"gfx3d {perf.get('gfx3d')}")
+    print(f"audiostat {stats}")
+    if audio != "none" and stats.get("stream_underruns", 0) > UNDERRUN_WARN_FRAMES:
+        print(f"WARN: the music stream underran for {stats['stream_underruns']} output "
+              "frames (PicoDeck issue #34)")
+    if w.get("p95", 0) > WORK_P95_TARGET_US:
+        print(f"WARN: work p95 {w.get('p95')} us leaves less headroom than the target")
+    print(f"report: reports/hw_lap-{stamp}.json")
+    if fails:
+        print("GATE FAIL: " + "; ".join(fails))
+        sys.exit(1)
+    print("GATE PASS")
+
+
+def install(args, audio: str):
+    t = connect(args)
+    try:
+        t.reboot()
+        push_game(t, args.clock, audio)
+    finally:
+        disarm(t)
+        t.close()
+    print(f"Installed Nova Rail ({audio} audio): launch it from the launcher.")
+
+
+def soak_stage(args, audio: str):
+    laps = max(1, round(args.soak_stage * 60 / LAP_S))
+    t = connect(args)
+    try:
+        t.reboot()
+        push_game(t, args.clock, audio)
+        t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(
+            {"autolap": True, "laps": laps, "rivals": args.rivals,
+             "mute": audio == "none"}).encode())
+        t.delete_file(f"/data/{APP_ID}/perf.json")
+    finally:
+        t.close()
+    clock = args.clock or json.loads((REPO / "app.json").read_text()).get("system_clock_khz")
+    print(f"Armed: a {laps}-lap race (about {laps * LAP_S / 60:.0f} min) at {clock} kHz.")
+    print("Unplug the USB cable, launch Nova Rail from the launcher, and plug the")
+    print("cable back in once it is back at the launcher. Then run --soak-read.")
+
+
+def soak_read(args):
+    t = connect(args)
+    try:
+        perf = json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
+        clock = json.loads(t.read_file(f"/apps/{APP}/app.json")).get("system_clock_khz")
+    finally:
+        disarm(t)
+        t.close()
+    line, report = soak_summary(perf, clock)
+    name = f"soak-{time.strftime('%Y%m%d-%H%M%S')}"
+    write_report(REPO / "reports", name, report)
+    print(line)
+    print(f"report: reports/{name}.json")
 
 
 def main():
@@ -140,89 +344,29 @@ def main():
     ap.add_argument("--laps", type=int, default=2)
     ap.add_argument("--rivals", type=int, default=5)
     ap.add_argument("--race-s", type=float, default=None,
-                    help="seconds to wait before polling for the exit (default 40 per lap + 25)")
-    ap.add_argument("--no-audio", action="store_true", help="skip the bench audio")
+                    help=f"seconds to wait before polling for the exit (default {LAP_S} per lap + 25)")
+    ap.add_argument("--no-audio", action="store_true", help="a silent race (dev.json mute)")
+    ap.add_argument("--clock", type=int, default=None, help="system_clock_khz for the pushed app.json")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--install", action="store_true",
+                      help="push the game with all its music, as a player gets it")
+    mode.add_argument("--soak-stage", type=float, metavar="MINUTES",
+                      help="push and arm a battery run of about MINUTES")
+    mode.add_argument("--soak-read", action="store_true", help="read the battery run's result")
     ap.add_argument("--picodeck", default=os.environ.get(
         "PICODECK_ROOT", str(Path.home() / "Projects" / "PicoDeck" / "picodeck")))
     args = ap.parse_args()
-    audio_on = not args.no_audio
-    race_s = args.race_s if args.race_s is not None else 40 * args.laps + 25
-    sys.path.insert(0, str(Path(args.picodeck) / "tests" / "e2e"))
-    from hw_target import HwTarget
-
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    reports = REPO / "reports"
-    t = HwTarget(args.device).connect()
-    perf, stats, shot = None, None, None
-    try:
-        t.reboot()
-        with tempfile.TemporaryDirectory() as tmp:
-            app = Path(tmp) / APP
-            stage(app)
-            if audio_on:
-                music_wav(app / "bench" / "music.wav")
-            t.push_app(app, APP)
-        if audio_on:
-            # Same app.json (no extra reboot); unzip merges into /apps/novarail.
-            with tempfile.TemporaryDirectory() as tmp:
-                app = Path(tmp) / APP
-                app.mkdir()
-                shutil.copy(REPO / "app.json", app / "app.json")
-                for i, hz in enumerate(SFX_HZ, 1):
-                    sfx_wav(app / "bench" / f"sfx{i}.wav", hz)
-                t.push_app(app, APP)
-        dev = {"autolap": True, "laps": args.laps, "rivals": args.rivals, "bench_audio": audio_on}
-        t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(dev).encode())
-        t.delete_file(f"/data/{APP_ID}/perf.json")
-
-        stats = measured_run(t, race_s=race_s)
-        perf = json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
-        # The measurement is saved before anything else can fail.
-        write_report(reports, stamp, {"perf": perf, "audiostat": stats, "laps": args.laps,
-                                      "rivals": args.rivals, "bench_audio": audio_on})
-
-        # A second, short run for the screenshot.
-        t.write_file(f"/data/{APP_ID}/dev.json",
-                     json.dumps({"autolap": True, "laps": 1, "rivals": args.rivals}).encode())
-        t.launch_app(APP)
-        time.sleep(12)
-        shot = t.screenshot()
-        t.exit_app()
-        t.wait_for_exit(timeout=30)
-    finally:
-        # A normal launch from the launcher must race, not autolap.
-        try:
-            t.delete_file(f"/data/{APP_ID}/dev.json")
-        except Exception as e:
-            print(f"WARN: could not delete dev.json ({e}); the next launch will autolap")
-        t.close()
-
-    audio = stats if audio_on else None
-    fails = verdict(perf, audio)
-    write_report(reports, stamp, {"perf": perf, "audiostat": stats, "gate_failures": fails,
-                                  "laps": args.laps, "rivals": args.rivals, "bench_audio": audio_on})
-    if shot:
-        (reports / f"hw_lap-{stamp}.png").write_bytes(shot)
-
-    w, i = perf.get("work_us", {}), perf.get("interval_us", {})
-    print(f"laps {perf.get('laps')} lap_ms {perf.get('lap_ms')} frames logged {perf.get('logged')}"
-          f" rivals {perf.get('rivals')}")
-    print(f"work_us     min {w.get('min')} avg {w.get('avg')} p95 {w.get('p95')} max {w.get('max')}"
-          f"  (headroom target p95 <= {WORK_P95_TARGET_US})")
-    print(f"interval_us min {i.get('min')} avg {i.get('avg')} p95 {i.get('p95')} max {i.get('max')}"
-          f"  missed {perf.get('missed')} late {perf.get('late')}")
-    print(f"sections {perf.get('sections')}")
-    print(f"gfx3d {perf.get('gfx3d')}")
-    print(f"audiostat {stats}")
-    if audio_on and (perf.get("music_underrun_frames") or 0) > 0:
-        print(f"WARN: the music underran in {perf['music_underrun_frames']} frames")
-    if w.get("p95", 0) > WORK_P95_TARGET_US:
-        print(f"WARN: work p95 {w.get('p95')} us leaves less headroom than the target")
-    print(f"report: reports/hw_lap-{stamp}.json")
-    if fails:
-        print("GATE FAIL: " + "; ".join(fails))
-        sys.exit(1)
-    print("GATE PASS")
+    if args.soak_read:
+        return soak_read(args)
+    audio = "none" if args.no_audio else ("full" if args.install else "bench")
+    missing = missing_assets(audio)
+    if missing:
+        raise SystemExit(f"hw_lap: no {', '.join(missing)}: run make assets (or pass --no-audio)")
+    if args.install:
+        return install(args, audio)
+    if args.soak_stage:
+        return soak_stage(args, audio)
+    return gate(args, audio)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,10 @@
 --                       instead of exiting
 --   laps = n            race length (default 3; 1 with autolap)
 --   rivals = n          rival ships, 0..5 (default 5)
---   bench_audio = true  play APP_DIR/bench/music.wav and bench/sfx1-6.wav
+--   bench_sfx = true    play APP_DIR/bench/sfx1-6.wav as six looping voices
+--                       over the game's music and engine (the gate's
+--                       stand-in for the effects P4b and P5 add)
+--   mute = true         no music and no engine note
 --   telemetry = true    write telemetry.json every 15 frames (the player's
 --                       ship, the race phase, the music track and whether
 --                       music and engine play)
@@ -62,29 +65,19 @@ local function write_json(name, value)
     fs.close(f)
 end
 
--- Music plus six looping voices, for the audio-headroom measurement. The
--- music is a WAV streamed by a fileplayer: MP3 decoding on Core 1 contends
--- with the game's core for the shared flash/PSRAM cache (PicoDeck's
--- docs/API-Audio-and-Sound.md).
-local function start_bench_audio()
-    local dir = APP_DIR .. "/bench"
-    local music = pc.sound.fileplayer()
-    if not (music and music:load(dir .. "/music.wav")) then
-        sys.log("bench audio: no " .. dir .. "/music.wav")
-        return nil
-    end
-    music:setVolume(50)
-    music:play(0)
+-- Six looping voices over the game's own audio: the gate's stand-in for
+-- the effects P4b and P5 add.
+local function start_bench_sfx()
     local voices = {}
     for i = 1, 6 do
-        local p = pc.sound.sampleplayer(dir .. "/sfx" .. i .. ".wav")
+        local p = pc.sound.sampleplayer(APP_DIR .. "/bench/sfx" .. i .. ".wav")
         if p then
             p:setVolume(30)
             p:play(0)
             voices[#voices + 1] = p
         end
     end
-    return { music = music, voices = voices }
+    return voices
 end
 
 local function loading(text)
@@ -93,10 +86,11 @@ local function loading(text)
     disp.flush()
 end
 
--- The perf.json summary of a logged run.
-local function summary(log, g, sec, r, ships, audio, frames, under)
-    local out = { laps = #r.times[1], lap_ms = {}, frames = frames, bench_audio = audio ~= nil,
-        music_underrun_frames = under,
+-- The perf.json summary of a logged run. bat0 is the battery level at the
+-- start (-1 on USB power).
+local function summary(log, g, sec, r, ships, bench, frames, bat0)
+    local out = { laps = #r.times[1], lap_ms = {}, frames = frames, bench_sfx = bench ~= nil,
+        battery = { start = bat0, finish = sys.getBattery() },
         rivals = #ships - 1, results = {} }
     for k, lt in ipairs(r.times[1]) do out.lap_ms[k] = race.ms(lt) end
     for _, row in ipairs(race.results(r, r.tr, ships)) do
@@ -135,7 +129,8 @@ local function race_once(env)
     local sec = { input = 0, sim = 0, camera = 0, draw = 0, hud = 0 }
     local st, hs = {}, { laps = env.laps, n = n }
     local P, dt, now = physics.P, 1 / M.FPS, sys.getTimeUs
-    local frame, prev_t0, work, under = 0, nil, 0, 0
+    local frame, prev_t0, work = 0, nil, 0
+    local bat0 = sys.getBattery()
 
     if env.sound then audio.start_race(env.sound) end
     hud.reset(h)
@@ -213,7 +208,6 @@ local function race_once(env)
             g.n = g.n + 1
             sec.input, sec.sim, sec.camera = sec.input + (tsim - t0), sec.sim + (tc - tsim), sec.camera + (td - tc)
             sec.draw, sec.hud = sec.draw + (te - td), sec.hud + (t1 - te)
-            if env.audio and env.audio.music:didUnderrun() then under = under + 1 end
         end
         prev_t0 = t0
         if dev.telemetry == true and frame % 15 == 0 then
@@ -227,7 +221,7 @@ local function race_once(env)
         disp.flush()
     end
     perf.setTargetFPS(0)
-    if env.auto and not env.stay then return "quit", summary(log, g, sec, r, ships, env.audio, frame, under) end
+    if env.auto and not env.stay then return "quit", summary(log, g, sec, r, ships, env.bench, frame, bat0) end
 
     if env.sound then audio.quiet(env.sound) end
     hud.reset(h)
@@ -259,17 +253,15 @@ function M.run()
         laps = math.max(1, math.tointeger(dev.laps) or (auto and 1 or 3)),
         rivals = math.min(5, math.max(0, math.tointeger(dev.rivals) or 5)),
     }
-    env.audio = dev.bench_audio == true and start_bench_audio() or nil
-    -- The game's own audio (music, engine); the bench audio replaces it.
-    if not env.audio then env.sound = audio.new() end
+    if dev.mute ~= true then env.sound = audio.new() end
+    if dev.bench_sfx == true then env.bench = start_bench_sfx() end
     local out
     repeat
         local result, stats = race_once(env)
         out = stats
     until (auto and not env.stay) or result == "quit"
-    if env.audio then
-        env.audio.music:stop()
-        for _, p in ipairs(env.audio.voices) do p:stop() end
+    if env.bench then
+        for _, p in ipairs(env.bench) do p:stop() end
     end
     if env.sound then audio.stop(env.sound) end
     if auto and out then write_json("perf.json", out) end

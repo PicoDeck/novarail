@@ -43,12 +43,15 @@ Thrust is automatic: the keyboard reports at most three keys at once.
 sources.
 `PICODECK_SIM_BINARY` picks another simulator build.
 
-`make hw-lap` is the hardware gate (`tools/hw_lap.py`): a two-lap race against
-five AI rivals with bench audio, the player's ship driven by the AI; it passes
-when no frame misses its 33.3 ms deadline or is shown late, the frame
-interval's p95 is at most 34 ms and the audio ISR stays under 2.4 ms. It sends
-nothing to the device during the race. Stop any other reader of the serial port
-first.
+`make hw-lap` is the hardware gate (`tools/hw_lap.py`; run `make assets`
+first): a two-lap race against five AI rivals, the player's ship driven by the
+AI, with the game's music and engine note plus six looping bench voices standing
+in for the effects still to come. It passes when no frame misses its 33.3 ms
+deadline or is shown late, the frame interval's p95 is at most 34 ms and the
+audio ISR stays under 2.4 ms. It sends nothing to the device during the race.
+Stop any other reader of the serial port first. The same tool installs the game
+with all its music for playing (`--install`) and measures battery drain
+(`--soak-stage`, then `--soak-read`; see its help).
 
 ## Test modes
 
@@ -57,12 +60,15 @@ first.
 - `"autolap": true`: the AI drives the player's ship too; the app exits when the
   race reaches its results and writes `perf.json` (frame work and interval
   min/avg/p95/max, missed and late frames, per-section timings, the player's
-  lap times, the finishing order, gfx3d stats).
+  lap times, the finishing order, gfx3d stats, the battery level at the start
+  and the end).
 - `"stay": true` (with autolap): show the results page and wait for a key
   instead of exiting.
 - `"laps": n`: race length (default 3, or 1 with autolap).
 - `"rivals": n`: AI rivals, 0 to 5 (default 5).
-- `"bench_audio": true`: plays `bench/music.wav` and `bench/sfx1-6.wav` from the
-  app directory (the gate tool stages them).
-- `"telemetry": true`: writes `telemetry.json` (the ship's state and the race
-  phase) every 15 frames.
+- `"bench_sfx": true`: plays `bench/sfx1-6.wav` from the app directory as six
+  looping voices over the game's own audio (the gate tool stages them).
+- `"mute": true`: no music and no engine note.
+- `"telemetry": true`: writes `telemetry.json` (the player's ship, the race
+  phase, the music track and whether the music and the engine note play) every
+  15 frames.

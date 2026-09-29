@@ -104,7 +104,9 @@ def test_autolap_writes_perf_json(novarail):
     for key in ("work_us", "interval_us"):
         assert set(perf[key]) == {"min", "avg", "p95", "max"}, perf[key]
     assert perf["gfx3d"]["drawn_avg"] > 50, perf["gfx3d"]
-    assert perf["bench_audio"] is False
+    assert perf["bench_sfx"] is False
+    assert set(perf["battery"]) == {"start", "finish"}, perf["battery"]
+    assert all(isinstance(v, int) for v in perf["battery"].values()), perf["battery"]
     assert isinstance(perf["late"], int)
     assert set(perf["sections"]) == {"input", "sim", "camera", "draw", "hud"}
     assert perf["rivals"] == 5
@@ -224,3 +226,29 @@ def test_bad_rivals_are_clamped(novarail, rivals, want):
     perf = json.loads((data / "perf.json").read_text())
     assert perf["rivals"] == want and len(perf["results"]) == want + 1, perf
 
+
+def test_mute_means_no_game_audio(novarail):
+    sim, data = novarail(dev={"telemetry": True, "mute": True}, assets=audio_assets())
+    sim.launch_app(APP)
+    tel = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 60)
+    assert tel["music"] is False and tel["engine"] is False, tel
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    assert not lua_errors(sim)
+
+
+def test_bench_sfx_play_over_the_music(novarail):
+    assets = dict(audio_assets())
+    for i in range(1, 7):
+        assets[f"bench/sfx{i}.wav"] = wav_bytes(0.5, 400 + 100 * i)
+    sim, data = novarail(dev={"telemetry": True, "bench_sfx": True}, assets=assets)
+    sim.launch_app(APP)
+    tel = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 150)
+    assert tel["music"] is True and tel["engine"] is True, tel
+    state = sim.call("get_audio_state")
+    assert state["stream_active"] and state["sound_players_active"] >= 7, state
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
+    state = sim.call("get_audio_state")
+    assert state["sound_players_active"] == 0, state
+    assert not lua_errors(sim)
