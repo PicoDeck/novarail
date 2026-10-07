@@ -23,19 +23,24 @@ function M.read(out, auto_thrust)
 end
 
 -- Race again, on the results page: A or Start pressed, but only once both
--- have been seen up after arm_again(). The player may still hold A
--- (accelerate) when the page comes up, and the PicoCalc keyboard reports a
--- held key's repeats as fresh presses.
-local armed = false
+-- have read up for ARM_POLLS polls in a row after arm_again(). The player
+-- may still hold A (accelerate) when the page comes up, and the PicoCalc
+-- keyboard repeats arrows, letters and the like as fresh presses every
+-- 100 ms, so one quiet poll after input.clearState() proves nothing; the
+-- results page polls every 20 ms, so 8 polls outlast a repeat.
+M.ARM_POLLS = 8
+
+local armed, quiet = false, 0
 
 function M.arm_again()
-    armed = false
+    armed, quiet = false, 0
 end
 
 function M.again_pressed()
     local again = gp.PAD_A | gp.PAD_START
     if not armed then
-        armed = gp.getButtons() & again == 0
+        quiet = gp.getButtons() & again == 0 and quiet + 1 or 0
+        armed = quiet >= M.ARM_POLLS
         return false
     end
     return gp.getButtonsPressed() & again ~= 0

@@ -52,7 +52,7 @@ return {
         local function press(btn)
             controls.arm_again()
             gp.held, gp.pressed = 0, 0
-            controls.again_pressed() -- nothing held: armed
+            for _ = 1, controls.ARM_POLLS do controls.again_pressed() end -- both up: armed
             gp.held, gp.pressed = btn, btn
             local again = controls.again_pressed()
             gp.held, gp.pressed = 0, 0
@@ -67,10 +67,16 @@ return {
         -- A still held from racing: the key's repeat re-presses it
         gp.held, gp.pressed = gp.PAD_A, gp.PAD_A
         T.eq(controls.again_pressed(), false, "not while A is still held from the race")
-        gp.held, gp.pressed = gp.PAD_A, 0
-        T.eq(controls.again_pressed(), false)
+        -- a repeat-as-press key (an arrow, a letter) after input.clearState():
+        -- up for a poll, then the next repeat arrives as a fresh press
         gp.held, gp.pressed = 0, 0
-        T.eq(controls.again_pressed(), false, "released: now armed")
+        T.eq(controls.again_pressed(), false)
+        gp.held, gp.pressed = gp.PAD_A, gp.PAD_A
+        T.eq(controls.again_pressed(), false, "a repeat after one quiet poll is not a fresh press")
+        gp.held, gp.pressed = 0, 0
+        for _ = 1, controls.ARM_POLLS do
+            T.eq(controls.again_pressed(), false, "released: arming")
+        end
         gp.held, gp.pressed = gp.PAD_A, gp.PAD_A
         T.eq(controls.again_pressed(), true, "a fresh press")
         gp.held, gp.pressed = 0, 0
