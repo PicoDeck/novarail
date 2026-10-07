@@ -134,6 +134,19 @@ return {
             if c[k] == 12 then windows = windows + 1 end
         end
         T.eq(windows, 2 * lit)
+        -- every lit band at least 2 pixels tall at the camera's widest view
+        -- (fovY 1.25 rad over 240 rows), or it sparkles as the view turns
+        local px_per_m = 120 / math.tan(1.25 / 2) / 500
+        for k = 1, #t // 3 do
+            if c[k] == 12 then
+                local lo, hi = math.huge, -math.huge
+                for d = 0, 2 do
+                    local _, y = vert(v, t[3 * k - 2 + d])
+                    lo, hi = math.min(lo, y), math.max(hi, y)
+                end
+                T.ok((hi - lo) * px_per_m >= 2, "window band " .. k .. ": " .. (hi - lo) * px_per_m .. " px")
+            end
+        end
         local top = -math.huge
         for i = 1, 4 do
             local _, y = vert(v, i)

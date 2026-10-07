@@ -140,6 +140,9 @@ end
 -- the window colour; unlit is the flag (gfx3d.UNLIT) every triangle gets:
 -- the towers are flat silhouettes against the sky.
 M.SKYLINE_BASE = -30 -- m: below the horizon, so no gap shows under the towers
+-- m: a lit band's height; at the skyline's 600 m that is over 2 pixels even
+-- at the widest view, so it does not sparkle as the view turns
+M.WINDOW_H = 9
 
 function M.skyline(radius, count, heights, colours, lit, unlit)
     local verts, tris, cols, flags = {}, {}, {}, {}
@@ -163,7 +166,7 @@ function M.skyline(radius, count, heights, colours, lit, unlit)
         quad(a0, a1, M.SKYLINE_BASE, h, colours[k % #colours + 1])
         if k % 3 == 0 then
             local inset = w * 0.15
-            quad(a0 + inset, a1 - inset, h * 0.82, h * 0.86, lit)
+            quad(a0 + inset, a1 - inset, h * 0.86 - M.WINDOW_H, h * 0.86, lit)
         end
     end
     return verts, tris, cols, flags
