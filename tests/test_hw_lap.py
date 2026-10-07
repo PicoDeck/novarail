@@ -16,7 +16,8 @@ import hw_lap  # noqa: E402
 
 PERF_OK = {"logged": 1100, "missed": 0, "late": 0,
            "interval_us": {"min": 33000, "avg": 33333, "p95": 33500, "max": 34100},
-           "work_us": {"min": 9000, "avg": 14000, "p95": 18000, "max": 24000}}
+           "work_us": {"min": 9000, "avg": 14000, "p95": 18000, "max": 24000},
+           "gfx3d": {"overflow": 0}}
 
 
 def fake_qoa(frames, rate=44100, channels=2):
@@ -78,6 +79,23 @@ def test_verdict_fails_each_gate():
 def test_verdict_fails_late_frames():
     perf = dict(PERF_OK, late=2)
     assert any("late" in f for f in hw_lap.verdict(perf, None))
+
+
+def test_verdict_fails_slow_work():
+    perf = dict(PERF_OK, work_us=dict(PERF_OK["work_us"], p95=24500))
+    fails = hw_lap.verdict(perf, None)
+    assert len(fails) == 1 and "work p95 24500" in fails[0], fails
+
+
+def test_verdict_fails_dropped_triangles():
+    perf = dict(PERF_OK, gfx3d={"overflow": 12})
+    fails = hw_lap.verdict(perf, None)
+    assert len(fails) == 1 and "12 triangles" in fails[0], fails
+
+
+def test_verdict_fails_without_an_overflow_count():
+    perf = dict(PERF_OK, gfx3d={"tris_in_max": 2000})
+    assert any("overflow" in f for f in hw_lap.verdict(perf, None))
 
 
 def test_verdict_without_a_frame_log():

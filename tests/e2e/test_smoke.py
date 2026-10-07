@@ -130,6 +130,7 @@ def test_autolap_writes_perf_json(novarail):
     for key in ("work_us", "interval_us"):
         assert set(perf[key]) == {"min", "avg", "p95", "max"}, perf[key]
     assert perf["gfx3d"]["drawn_avg"] > 50, perf["gfx3d"]
+    assert perf["gfx3d"]["overflow"] == 0, perf["gfx3d"]
     assert perf["bench_sfx"] is False
     bat = perf["battery"]
     assert set(bat) == {"start", "finish", "usb_start", "usb_finish"}, bat

@@ -107,7 +107,8 @@ local function summary(log, g, sec, r, ships, env, frames, bat0, usb0)
         out.logged, out.missed, out.late = s.frames, s.missed, s.late
         out.work_us, out.interval_us = s.work_us, s.interval_us
         out.gfx3d = { us_geom_avg = g.geom // g.n, us_raster_avg = g.raster // g.n,
-            drawn_avg = g.drawn // g.n, drawn_max = g.drawn_max, tris_in_max = g.tris_max }
+            drawn_avg = g.drawn // g.n, drawn_max = g.drawn_max, tris_in_max = g.tris_max,
+            overflow = g.overflow }
         out.sections = { input = sec.input // g.n, sim = sec.sim // g.n, camera = sec.camera // g.n,
             draw = sec.draw // g.n, hud = sec.hud // g.n }
     end
@@ -132,7 +133,7 @@ local function race_once(env)
     local me, cam = ships[1], camera.new()
     local log = env.log
     if log then perflog.reset(log) end
-    local g = { geom = 0, raster = 0, drawn = 0, drawn_max = 0, tris_max = 0, n = 0 }
+    local g = { geom = 0, raster = 0, drawn = 0, drawn_max = 0, tris_max = 0, n = 0, overflow = 0 }
     local sec = { input = 0, sim = 0, camera = 0, draw = 0, hud = 0 }
     local st, hs = {}, { laps = env.laps, n = n }
     local P, dt, now = physics.P, 1 / M.FPS, sys.getTimeUs
@@ -217,6 +218,7 @@ local function race_once(env)
 
         local t1 = now()
         work = t1 - t0 -- integer subtraction: right across the 32-bit wrap
+        g.overflow = g.overflow + st.overflow -- every frame, warm-up included: the gate wants none
         if prev_t0 and frame > M.WARMUP then
             if log then perflog.add(log, work, t0 - prev_t0) end
             g.geom, g.raster, g.drawn = g.geom + st.us_geom, g.raster + st.us_raster, g.drawn + st.drawn
