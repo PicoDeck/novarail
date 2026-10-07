@@ -177,9 +177,17 @@ local function race_once(env)
             end
         end
         local tsim = now()
-        for _ = 1, M.SUBSTEPS do physics.step(tr, me, ctl[1], dt / M.SUBSTEPS) end
+        local e0, hit = me.energy, 0
+        for _ = 1, M.SUBSTEPS do
+            physics.step(tr, me, ctl[1], dt / M.SUBSTEPS)
+            hit = hit + me.impact
+        end
         for i = 2, n do physics.step(tr, ships[i], ctl[i], dt) end
+        local vs0 = me.vs
         collide.resolve(tr, ships)
+        hit = hit + math.abs(me.vs - vs0) -- a shove
+        if hit > 0 then camera.jolt(cam, hit) end
+        if me.energy < e0 - 0.5 then hud.flash(h) end
         race.update(r, ships)
         frame = frame + 1
         if r.phase == "results" then break end
