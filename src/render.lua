@@ -29,23 +29,38 @@ M.SHIP_COLOURS = {
 
 local function palette()
     return {
-        road = { rgb(88, 92, 108), rgb(104, 108, 124) },
-        line = rgb(235, 235, 235),
-        pad = rgb(40, 220, 240),
-        wall = { rgb(210, 60, 70), rgb(235, 235, 235) },
-        ground = { rgb(60, 120, 70), rgb(50, 102, 60) },
-        recharge = { rgb(200, 80, 200), rgb(170, 60, 180) },
+        road = { rgb(34, 36, 58), rgb(40, 43, 68) },
+        line = rgb(240, 240, 255),
+        pad = rgb(255, 230, 60),
+        recharge = { rgb(120, 40, 150), rgb(95, 30, 125) },
+        dash = rgb(255, 60, 200),
+        barrier = { rgb(0, 210, 245), rgb(0, 190, 230) },
+        chevron = { rgb(255, 60, 200), rgb(60, 20, 70) },
+        ground = { rgb(18, 16, 44), rgb(26, 22, 60) },
+        pylon = rgb(50, 50, 90),
+        gantry = rgb(60, 60, 100),
+        beam = rgb(255, 60, 200),
+        start_beam = rgb(240, 240, 255),
     }
 end
 
 -- Returns the scene: gfx3d meshes for the track chunks, the ships (one per
 -- colour) and the mountain ring, with the chunk index of every segment.
 function M.init(tr)
-    local data = trackmesh.build(tr, palette(), g3.DOUBLE_SIDED)
-    local roads, grounds = {}, {}
+    local data = trackmesh.build(tr, palette(), g3.DOUBLE_SIDED, g3.UNLIT | g3.NO_FOG)
+    local roads, grounds, gidx = {}, {}, {}
     for i, ch in ipairs(data.chunks) do
         roads[i] = g3.newMesh(ch.road[1], ch.road[2], ch.road[3], ch.road[4])
-        grounds[i] = g3.newMesh(ch.ground[1], ch.ground[2], ch.ground[3])
+        if #ch.ground[2] > 0 then -- gfx3d has no empty meshes
+            grounds[#grounds + 1] = g3.newMesh(ch.ground[1], ch.ground[2], ch.ground[3])
+            gidx[i] = #grounds
+        end
+    end
+    -- gfirst[c]: chunk c's ground in `grounds`, or the next chunk's that has one
+    local gfirst, nxt = {}, 1
+    for i = #data.chunks, 1, -1 do
+        nxt = gidx[i] or nxt
+        gfirst[i] = nxt
     end
     local ships = {}
     for i, col in ipairs(M.SHIP_COLOURS) do
@@ -61,7 +76,8 @@ function M.init(tr)
     g3.setSky({ { -1.2, rgb(58, 110, 66) }, { 0, HORIZON },
         { 0.06, rgb(130, 150, 220) }, { 0.35, rgb(50, 60, 150) } })
     g3.setFog(M.FOG_NEAR, M.FOG_FAR, HORIZON)
-    return { roads = roads, grounds = grounds, of = data.of, ships = ships, mountains = mountains }
+    return { roads = roads, grounds = grounds, gfirst = gfirst, of = data.of, ships = ships,
+        mountains = mountains }
 end
 
 -- One frame into the back buffer's viewport (the caller flushes). ships[1]
@@ -88,7 +104,7 @@ function M.draw(scene, tr, ships, cam)
     -- frame in Lua->C calls). gfx3d culls those outside the view or beyond FAR.
     local first = (scene.of[me.seg] - 2) % #scene.roads + 1
     g3.drawList(scene.roads, 0, first)
-    g3.drawList(scene.grounds, M.GROUND_BIAS, first)
+    g3.drawList(scene.grounds, M.GROUND_BIAS, scene.gfirst[first])
     g3.endScene()
 end
 
