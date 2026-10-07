@@ -40,6 +40,7 @@ M.P = {
     SCRAPE_DECEL = 12, -- m/s^2 while scraping (touched the wall in the last SCRAPE_HOLD)
     SCRAPE_ENERGY = 6, -- energy per second while scraping
     SCRAPE_HOLD = 0.25, -- s
+    SCRAPE_WN = 2,     -- m/s into the wall a scrape absorbs before it is a fresh hit
     STUN_WN = 8,       -- m/s into the wall: a harder hit stuns
     STUN_TIME = 0.4,   -- s
     STUN_STEER = 0.5,  -- steering is scaled by this while stunned
@@ -124,14 +125,20 @@ function M.step(tr, s, c, dt)
         local wn = (v * sin(psi) + vs) * side -- speed into the wall
         if wn > 0 then
             hit = true
-            impact = P.WALL_LOSS * wn
-            if impact > v then impact = v end
-            v = v - impact
-            damage = P.WALL_DAMAGE * wn
-            if damage > P.WALL_HIT_MAX then damage = P.WALL_HIT_MAX end
+            -- Steering into the wall turns the ship back into it every
+            -- step: while already scraping, only speed into the wall over
+            -- SCRAPE_WN is a fresh hit (the scrape itself is billed below).
+            local fresh = scrape > 0 and wn - P.SCRAPE_WN or wn
+            if fresh > 0 then
+                impact = P.WALL_LOSS * fresh
+                if impact > v then impact = v end
+                v = v - impact
+                damage = P.WALL_DAMAGE * fresh
+                if damage > P.WALL_HIT_MAX then damage = P.WALL_HIT_MAX end
+                if fresh > P.STUN_WN then stun = P.STUN_TIME end
+            end
             if psi * side > 0 then psi = -psi * P.WALL_BOUNCE end
             vs = -side * P.E_WALL * wn - v * sin(psi)
-            if wn > P.STUN_WN then stun = P.STUN_TIME end
             scrape = P.SCRAPE_HOLD
         end
     end

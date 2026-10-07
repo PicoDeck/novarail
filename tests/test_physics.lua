@@ -216,6 +216,16 @@ return {
         T.ok(s.v < free.v - 10, "riding the wall bleeds speed: " .. s.v .. " vs " .. free.v)
         T.ok(s.energy < P.ENERGY - 10, "and energy: " .. s.energy)
     end,
+    riding_a_wall_costs_the_scrape_rate = function()
+        -- Steering into a wall turns the ship back into it every step: one
+        -- long scrape, not a fresh hit each step.
+        local lim = circle.w[1] * 0.5 - P.SHIP_HALF_W
+        local s = physics.new_ship(1, 0, lim)
+        s.v = 50
+        run(circle, s, { steer = 1, thrust = true }, 2)
+        T.ok(s.energy >= P.ENERGY - 2 * P.SCRAPE_ENERGY - 5, "two seconds on the wall: energy " .. s.energy)
+        T.ok(s.energy < P.ENERGY - P.SCRAPE_ENERGY, "but it still costs: " .. s.energy)
+    end,
     hard_hit_stuns_then_wears_off = function()
         local lim = circle.w[1] * 0.5 - P.SHIP_HALF_W
         local s = physics.new_ship(1, 0, lim - 0.01)
