@@ -17,15 +17,38 @@ M.SHIP_FAR = 160   -- m: nor one further ahead (fog has it down to a speck)
 
 local FOG = rgb(70, 24, 100) -- the night haze; glowing parts ignore it
 
--- Ship colours, player first: { body, trim } per ship.
-M.SHIP_COLOURS = {
-    { rgb(240, 200, 40), rgb(40, 60, 160) },
-    { rgb(220, 60, 60), rgb(250, 250, 250) },
-    { rgb(60, 200, 90), rgb(20, 40, 30) },
-    { rgb(230, 120, 30), rgb(40, 40, 40) },
-    { rgb(150, 80, 220), rgb(240, 220, 90) },
-    { rgb(60, 190, 230), rgb(20, 30, 90) },
+-- The ships, player first: { model, body colour, accent colour }. The
+-- player flies the Needle; the rivals alternate Twin-pods and Darts.
+M.SHIPS = {
+    { "needle", rgb(240, 200, 40), rgb(255, 240, 120) },
+    { "twin_pod", rgb(230, 50, 70), rgb(255, 120, 140) },
+    { "dart", rgb(60, 220, 110), rgb(150, 255, 180) },
+    { "twin_pod", rgb(250, 130, 30), rgb(255, 190, 110) },
+    { "dart", rgb(160, 80, 240), rgb(210, 160, 255) },
+    { "twin_pod", rgb(40, 200, 240), rgb(160, 240, 255) },
 }
+M.FLARE_PX = 12     -- the engine flare image, square
+M.FLARE_SIZE = 0.9  -- m tall in the world
+M.FLARE_BACK = 1.6  -- m behind the ship's origin
+M.FLARE_UP = 0.25   -- m above it
+
+local KEY = rgb(255, 0, 255) -- the flare images' transparent colour
+local WHITE = rgb(255, 255, 255)
+
+-- An engine flare: a diamond with a white-hot core and a rim in `rim`.
+local function flare(rim)
+    local n = M.FLARE_PX
+    local img = picocalc.graphics.image.new(n, n)
+    img:setTransparentColor(KEY)
+    local c = (n - 1) / 2
+    for y = 0, n - 1 do
+        for x = 0, n - 1 do
+            local d = math.abs(x - c) + math.abs(y - c)
+            img:setPixel(x, y, d <= n * 0.2 and WHITE or (d <= c and rim or KEY))
+        end
+    end
+    return img
+end
 
 local function palette()
     return {
@@ -62,10 +85,12 @@ function M.init(tr)
         nxt = gidx[i] or nxt
         gfirst[i] = nxt
     end
-    local ships = {}
-    for i, col in ipairs(M.SHIP_COLOURS) do
-        local v, t, c = models.ship(col[1], col[2])
-        ships[i] = g3.newMesh(v, t, c)
+    local ships, flares = {}, {}
+    local glow = g3.UNLIT | g3.NO_FOG
+    for i, sh in ipairs(M.SHIPS) do
+        local v, t, c, f = models[sh[1]](sh[2], sh[3], g3.DOUBLE_SIDED, glow)
+        ships[i] = g3.newMesh(v, t, c, f)
+        flares[i] = flare(sh[3])
     end
     local v, t, c, f = models.skyline(600, 40, { 40, 70, 55, 95, 35, 120, 60, 80 },
         { rgb(30, 20, 60), rgb(38, 26, 72), rgb(24, 16, 50) }, rgb(255, 120, 220), g3.UNLIT)
@@ -77,7 +102,7 @@ function M.init(tr)
         { 0.12, rgb(45, 20, 90) }, { 0.35, rgb(12, 10, 40) } })
     g3.setFog(M.FOG_NEAR, M.FOG_FAR, FOG)
     return { roads = roads, grounds = grounds, gfirst = gfirst, of = data.of, ships = ships,
-        skyline = skyline }
+        flares = flares, skyline = skyline }
 end
 
 -- One frame into the back buffer's viewport (the caller flushes). ships[1]
@@ -96,7 +121,11 @@ function M.draw(scene, tr, ships, cam)
         if ds > half then ds = ds - total elseif ds < -half then ds = ds + total end
         if ds > -M.BEHIND and ds < M.SHIP_FAR then
             local sx, sy, sz, fx, fy, fz, ux, uy, uz = camera.ship_pose(tr, s)
-            g3.drawBasis(scene.ships[(i - 1) % #scene.ships + 1], sx, sy, sz, fx, fy, fz, ux, uy, uz, 1, 0, true)
+            local k = (i - 1) % #scene.ships + 1
+            g3.drawBasis(scene.ships[k], sx, sy, sz, fx, fy, fz, ux, uy, uz, 1, 0, true)
+            local b, h = M.FLARE_BACK, M.FLARE_UP
+            g3.drawSprite(scene.flares[k], sx - fx * b + ux * h, sy - fy * b + uy * h, sz - fz * b + uz * h,
+                M.FLARE_SIZE)
         end
     end
     -- Every chunk, nearest first: from the one behind the ship's, forwards,

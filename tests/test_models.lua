@@ -13,29 +13,98 @@ local function normal_and_centroid(v, a, b, c)
         (ax + bx + cx) / 3, (ay + by + cy) / 3, (az + bz + cz) / 3
 end
 
-return {
-    ship_faces_outwards = function()
-        local v, t, c = models.ship(1, 2)
-        local n = #v // 3
-        local mx, my, mz = 0, 0, 0
-        for i = 1, n do
-            local x, y, z = vert(v, i)
-            mx, my, mz = mx + x / n, my + y / n, mz + z / n
+local DOUBLE, GLOW = 16, 3
+local BODY, ACCENT = 101, 102
+local SHIPS = { needle = 26, twin_pod = 42, dart = 13 }
+
+-- The model's parts: groups of triangles joined by shared vertices.
+local function parts(t)
+    local up = {}
+    local function find(i)
+        while up[i] and up[i] ~= i do i = up[i] end
+        return i
+    end
+    for k = 1, #t // 3 do
+        local a = find(t[3 * k - 2])
+        for d = 1, 2 do
+            local b = find(t[3 * k - 2 + d])
+            if a ~= b then up[b] = a end
         end
-        T.eq(#c, #t // 3)
-        for k = 1, #t // 3 do
-            local nx, ny, nz, gx, gy, gz = normal_and_centroid(v, t[3 * k - 2], t[3 * k - 1], t[3 * k])
-            T.ok(nx * (gx - mx) + ny * (gy - my) + nz * (gz - mz) > 0, "triangle " .. k .. " faces out")
+    end
+    return find
+end
+
+return {
+    ships_have_their_triangle_counts = function()
+        for name, want in pairs(SHIPS) do
+            local v, t, c, f = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            T.eq(#t // 3, want, name)
+            T.eq(#c, want, name .. " colours"); T.eq(#f, want, name .. " flags")
+            T.eq(#v % 3, 0)
+            for _, i in ipairs(t) do T.ok(i >= 1 and i <= #v // 3, name .. " index " .. i) end
         end
     end,
-    ship_nose_points_minus_z = function()
-        local v = models.ship(1, 2)
-        local minz, at = math.huge, 0
-        for i = 1, #v // 3 do
-            local _, _, z = vert(v, i)
-            if z < minz then minz, at = z, i end
+    ship_noses_point_minus_z = function()
+        for name in pairs(SHIPS) do
+            local v = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            local minz, x = math.huge, nil
+            for i = 1, #v // 3 do
+                local vx, _, z = vert(v, i)
+                if z < minz then minz, x = z, vx end
+            end
+            T.ok(minz < -2, name .. " nose " .. minz); T.eq(x, 0, name .. " nose on the centre line")
         end
-        T.eq(at, 1, "the nose is vertex 1"); T.ok(minz < -2)
+    end,
+    ship_hulls_are_closed_and_face_out = function()
+        for name in pairs(SHIPS) do
+            local v, t, _, f = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            local find = parts(t)
+            -- each part's centroid, over its one-sided triangles' vertices
+            local sum, edges = {}, {}
+            for k = 1, #t // 3 do
+                if f[k] & DOUBLE == 0 then
+                    local p = find(t[3 * k - 2])
+                    local s_ = sum[p] or { 0, 0, 0, 0 }
+                    for d = 0, 2 do
+                        local x, y, z = vert(v, t[3 * k - 2 + d])
+                        s_[1], s_[2], s_[3], s_[4] = s_[1] + x, s_[2] + y, s_[3] + z, s_[4] + 1
+                        local a, b = t[3 * k - 2 + d], t[3 * k - 2 + (d + 1) % 3]
+                        local key = a .. ">" .. b
+                        T.ok(not edges[key], name .. ": edge " .. key .. " used twice the same way")
+                        edges[key] = true
+                    end
+                    sum[p] = s_
+                end
+            end
+            for key in pairs(edges) do
+                local a, b = key:match("(%d+)>(%d+)")
+                T.ok(edges[b .. ">" .. a], name .. ": open edge " .. key)
+            end
+            for k = 1, #t // 3 do
+                if f[k] & DOUBLE == 0 then
+                    local s_ = sum[find(t[3 * k - 2])]
+                    local nx, ny, nz, gx, gy, gz = normal_and_centroid(v, t[3 * k - 2], t[3 * k - 1], t[3 * k])
+                    local d = nx * (gx - s_[1] / s_[4]) + ny * (gy - s_[2] / s_[4]) + nz * (gz - s_[3] / s_[4])
+                    T.ok(d > 0, name .. " triangle " .. k .. " faces out")
+                end
+            end
+        end
+    end,
+    ships_wear_the_team_colours_and_glow = function()
+        for name in pairs(SHIPS) do
+            local _, t, c, f = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            local body, accent, glow = 0, 0, 0
+            for k = 1, #t // 3 do
+                if c[k] == BODY then body = body + 1 end
+                if c[k] == ACCENT then
+                    accent = accent + 1
+                    T.eq(f[k] & GLOW, GLOW, name .. ": the accent glows")
+                end
+                if f[k] & GLOW == GLOW then glow = glow + 1 end
+            end
+            T.ok(body >= 2, name .. " body " .. body); T.ok(accent >= 1, name .. " accent")
+            T.ok(glow > accent, name .. ": the engine glows too")
+        end
     end,
     skyline_faces_the_centre = function()
         local UNLIT = 8
