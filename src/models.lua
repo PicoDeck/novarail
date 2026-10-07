@@ -28,27 +28,40 @@ function M.ship(body, trim)
     return verts, tris, cols
 end
 
--- A ring of `count` mountain peaks at `radius`, for drawBackground: each is
--- one triangle facing the centre, overlapping its neighbours. heights and
--- colours are lists cycled around the ring.
-function M.mountains(radius, count, heights, colors)
-    local verts, tris, cols = {}, {}, {}
+-- A city skyline: a ring of `count` towers at `radius`, for
+-- drawBackground. Each tower is one quad facing the centre, its width and
+-- height varied so neighbours do not line up; every third tower carries a
+-- lit band of windows near its top. heights and colours are cycled; lit is
+-- the window colour; unlit is the flag (gfx3d.UNLIT) every triangle gets:
+-- the towers are flat silhouettes against the sky.
+M.SKYLINE_BASE = -30 -- m: below the horizon, so no gap shows under the towers
+
+function M.skyline(radius, count, heights, colours, lit, unlit)
+    local verts, tris, cols, flags = {}, {}, {}, {}
     local step = 2 * pi / count
+    local function quad(a0, a1, y0, y1, col)
+        local base = #verts // 3
+        for _, p in ipairs({ { a0, y0 }, { a1, y0 }, { a1, y1 }, { a0, y1 } }) do
+            verts[#verts + 1] = radius * sin(p[1])
+            verts[#verts + 1] = p[2]
+            verts[#verts + 1] = -radius * cos(p[1])
+        end
+        for _, t in ipairs({ 1, 2, 3, 1, 3, 4 }) do tris[#tris + 1] = base + t end
+        cols[#cols + 1] = col; cols[#cols + 1] = col
+        flags[#flags + 1] = unlit; flags[#flags + 1] = unlit
+    end
     for k = 0, count - 1 do
         local a = k * step
-        local a0, a1 = a - step * 0.9, a + step * 0.9
-        local h = heights[k % #heights + 1]
-        local base = #verts // 3
-        verts[#verts + 1] = radius * sin(a0); verts[#verts + 1] = -radius * 0.05
-        verts[#verts + 1] = -radius * cos(a0)
-        verts[#verts + 1] = radius * sin(a1); verts[#verts + 1] = -radius * 0.05
-        verts[#verts + 1] = -radius * cos(a1)
-        verts[#verts + 1] = radius * sin(a); verts[#verts + 1] = h
-        verts[#verts + 1] = -radius * cos(a)
-        tris[#tris + 1] = base + 1; tris[#tris + 1] = base + 2; tris[#tris + 1] = base + 3
-        cols[#cols + 1] = colors[k % #colors + 1]
+        local w = step * (0.55 + 0.35 * ((k * 7) % 5) / 4)
+        local h = heights[(k * 3) % #heights + 1]
+        local a0, a1 = a - w / 2, a + w / 2
+        quad(a0, a1, M.SKYLINE_BASE, h, colours[k % #colours + 1])
+        if k % 3 == 0 then
+            local inset = w * 0.15
+            quad(a0 + inset, a1 - inset, h * 0.82, h * 0.86, lit)
+        end
     end
-    return verts, tris, cols
+    return verts, tris, cols, flags
 end
 
 return M

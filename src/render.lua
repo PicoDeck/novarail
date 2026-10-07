@@ -10,12 +10,12 @@ local rgb = picocalc.display.rgb
 
 M.VIEW_W, M.VIEW_H = 320, 240 -- the HUD panel takes the bottom 80 rows
 M.NEAR, M.FAR = 0.5, 260
-M.FOG_NEAR, M.FOG_FAR = 90, 250
+M.FOG_NEAR, M.FOG_FAR = 70, 250
 M.GROUND_BIAS = 60 -- m: the ground sorts behind the road beside it
 M.BEHIND = 30      -- m: a ship further behind the camera's ship is not drawn
 M.SHIP_FAR = 160   -- m: nor one further ahead (fog has it down to a speck)
 
-local HORIZON = rgb(236, 170, 120)
+local FOG = rgb(70, 24, 100) -- the night haze; glowing parts ignore it
 
 -- Ship colours, player first: { body, trim } per ship.
 M.SHIP_COLOURS = {
@@ -67,17 +67,17 @@ function M.init(tr)
         local v, t, c = models.ship(col[1], col[2])
         ships[i] = g3.newMesh(v, t, c)
     end
-    local v, t, c = models.mountains(600, 28, { 70, 110, 55, 90, 130, 60, 85 },
-        { rgb(96, 84, 130), rgb(84, 74, 118), rgb(108, 94, 140) })
-    local mountains = g3.newMesh(v, t, c)
+    local v, t, c, f = models.skyline(600, 40, { 40, 70, 55, 95, 35, 120, 60, 80 },
+        { rgb(30, 20, 60), rgb(38, 26, 72), rgb(24, 16, 50) }, rgb(255, 120, 220), g3.UNLIT)
+    local skyline = g3.newMesh(v, t, c, f)
 
     g3.setViewport(0, 0, M.VIEW_W, M.VIEW_H)
-    g3.setLight(0.4, 1, 0.3, 0.35)
-    g3.setSky({ { -1.2, rgb(58, 110, 66) }, { 0, HORIZON },
-        { 0.06, rgb(130, 150, 220) }, { 0.35, rgb(50, 60, 150) } })
-    g3.setFog(M.FOG_NEAR, M.FOG_FAR, HORIZON)
+    g3.setLight(0.4, 1, 0.3, 0.45)
+    g3.setSky({ { -1.2, rgb(14, 12, 36) }, { 0, rgb(200, 50, 150) }, { 0.03, rgb(110, 30, 120) },
+        { 0.12, rgb(45, 20, 90) }, { 0.35, rgb(12, 10, 40) } })
+    g3.setFog(M.FOG_NEAR, M.FOG_FAR, FOG)
     return { roads = roads, grounds = grounds, gfirst = gfirst, of = data.of, ships = ships,
-        mountains = mountains }
+        skyline = skyline }
 end
 
 -- One frame into the back buffer's viewport (the caller flushes). ships[1]
@@ -87,7 +87,7 @@ function M.draw(scene, tr, ships, cam)
     g3.setProjection(cam.fov, M.NEAR, M.FAR)
     g3.lookAt(cam.ex, cam.ey, cam.ez, cam.tx, cam.ty, cam.tz, cam.ux, cam.uy, cam.uz)
     g3.beginScene()
-    g3.drawBackground(scene.mountains)
+    g3.drawBackground(scene.skyline)
     local me = ships[1]
     local len, half, total = tr.len, tr.total * 0.5, tr.total
     for i = 1, #ships do

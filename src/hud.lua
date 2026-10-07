@@ -17,11 +17,13 @@ local disp = picocalc.display
 local rgb = disp.rgb
 
 local Y = 240
-local BG, FG, DIM, HI = rgb(16, 18, 30), rgb(230, 230, 240), rgb(130, 134, 160), rgb(250, 200, 60)
+-- The neon palette: a dark navy panel under a magenta edge, cyan accents.
+local BG, FG, DIM, HI = rgb(10, 12, 34), rgb(220, 230, 255), rgb(110, 120, 170), rgb(0, 220, 250)
+local EDGE = rgb(255, 60, 200)
 local BAR_X, BAR_Y, BAR_W, BAR_H = 224, Y + 42, 88, 8
-local BAR_BG = rgb(50, 52, 70)
-local E_HIGH, E_MID, E_LOW = rgb(80, 220, 110), rgb(240, 210, 60), rgb(240, 70, 60)
-local BIG = rgb(250, 220, 60)
+local BAR_BG = rgb(34, 36, 70)
+local E_HIGH, E_MID, E_LOW = rgb(0, 210, 245), rgb(255, 60, 200), rgb(255, 70, 60)
+local BIG = rgb(255, 60, 200)
 
 M.EVERY = 4
 
@@ -47,6 +49,7 @@ function M.draw(h, st)
     h.frame = h.frame + 1
     if not c.panel then
         disp.fillRect(0, Y, 320, 80, BG)
+        disp.fillRect(0, Y, 320, 2, EDGE)
         disp.drawText(168, Y + 42, "ENERGY", DIM, BG)
         c.panel = true
     end

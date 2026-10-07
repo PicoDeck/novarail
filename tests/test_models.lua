@@ -37,14 +37,24 @@ return {
         end
         T.eq(at, 1, "the nose is vertex 1"); T.ok(minz < -2)
     end,
-    mountains_face_the_centre = function()
-        local v, t, c = models.mountains(500, 24, { 60, 90, 45 }, { 10, 11 })
-        T.eq(#t // 3, 24); T.eq(#c, 24)
-        for k = 1, 24 do
+    skyline_faces_the_centre = function()
+        local UNLIT = 8
+        local v, t, c, f = models.skyline(500, 40, { 60, 90, 45 }, { 10, 11 }, 12, UNLIT)
+        local towers, lit = 40, (40 + 2) // 3 -- a lit band on every third tower
+        T.eq(#t // 3, 2 * towers + 2 * lit); T.eq(#c, #t // 3); T.eq(#f, #t // 3)
+        local windows = 0
+        for k = 1, #t // 3 do
             local nx, ny, nz, gx, gy, gz = normal_and_centroid(v, t[3 * k - 2], t[3 * k - 1], t[3 * k])
-            T.ok(nx * gx + ny * gy + nz * gz < 0, "peak " .. k .. " faces in")
+            T.ok(nx * gx + ny * gy + nz * gz < 0, "triangle " .. k .. " faces in")
+            T.eq(f[k], UNLIT, "flat silhouettes, unlit")
+            if c[k] == 12 then windows = windows + 1 end
         end
-        local _, h = vert(v, 3)
-        T.eq(h, 60, "first peak height")
+        T.eq(windows, 2 * lit)
+        local top = -math.huge
+        for i = 1, 4 do
+            local _, y = vert(v, i)
+            top = math.max(top, y)
+        end
+        T.eq(top, 60, "first tower height")
     end,
 }
