@@ -69,6 +69,56 @@ return {
         T.ok(a.psi > b.psi, "right airbrake turns right")
         T.ok(a.v < b.v, "airbrake drags")
     end,
+    grip_caps_the_turn_rate_at_speed = function()
+        local slow, fast = physics.new_ship(), physics.new_ship()
+        slow.v, fast.v = 10, 60
+        physics.step(circle, slow, { steer = 1 }, 0.1)
+        physics.step(circle, fast, { steer = 1 }, 0.1)
+        -- the step slows the ship (drag) before it turns; the bend itself
+        -- turns the heading back by kr * v
+        local k = circle.kr[1]
+        T.near(slow.psi, (P.STEER_RATE - k * slow.v) * 0.1, 1e-3, "full lock at 10 m/s")
+        T.near(fast.psi, (P.A_GRIP / fast.v - k * fast.v) * 0.1, 1e-3, "grip-capped at 60 m/s")
+        T.ok(fast.psi < 0.5 * P.STEER_RATE * 0.1, "well under full lock")
+    end,
+    too_fast_for_a_bend_runs_wide = function()
+        local tight = F.circle(60, 16) -- a right-hand bend: the outside is u < 0
+        local function outside_hits(v, c)
+            local s = physics.new_ship(1, 0, 0)
+            s.v = v
+            local hits = 0
+            run(tight, s, c, 2, function(st)
+                st.v = v -- hold the speed: this measures the turn alone
+                if st.hit and st.u < 0 then hits = hits + 1 end
+            end)
+            return hits
+        end
+        T.eq(outside_hits(40, { steer = 1 }), 0, "40 m/s holds the 60 m bend")
+        T.ok(outside_hits(55, { steer = 1 }) > 0, "55 m/s runs wide into the outside wall")
+    end,
+    airbrake_turns_past_the_grip_limit = function()
+        local tight = F.circle(60, 16)
+        local function outside_hits(c)
+            local s = physics.new_ship(1, 0, 0)
+            s.v = 50
+            local hits = 0
+            run(tight, s, c, 2, function(st)
+                st.v = 50
+                if st.hit and st.u < 0 then hits = hits + 1 end
+            end)
+            return hits
+        end
+        T.ok(outside_hits({ steer = 1 }) > 0, "50 m/s on steering alone runs wide")
+        T.eq(outside_hits({ steer = 1, abR = true }), 0, "the inside airbrake holds the bend")
+    end,
+    both_airbrakes_slow_without_turning = function()
+        local a, b = physics.new_ship(), physics.new_ship()
+        a.v, b.v = 40, 40
+        run(circle, a, { steer = 0, abL = true, abR = true }, 1)
+        run(circle, b, { steer = 0 }, 1)
+        T.near(a.psi, b.psi, 0.02, "the two turns cancel")
+        T.ok(a.v < b.v - 6, "double the drag: " .. a.v .. " vs " .. b.v)
+    end,
     pad_kicks_once = function()
         local tr = F.track1()
         local seg

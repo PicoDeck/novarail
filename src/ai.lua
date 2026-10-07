@@ -1,7 +1,7 @@
 -- Rival drivers (pure Lua). prepare() works out, once per track, a racing
 -- line (a lateral target per segment, towards the inside of each bend) and
--- a speed profile (the most each segment allows, braking early enough for
--- the next bend). controls() drives one ship along them: it steers for a
+-- a speed profile (the most each segment's grip allows, braking early
+-- enough for the next bend). controls() drives one ship along them: it steers for a
 -- point a little ahead on the line, pulls out round a slower ship in its
 -- lane, keeps a lane's width from a ship alongside, and scales its thrust by its skill and its distance to the player
 -- (rubber-banding: the leader eases off, the last pushes harder).
@@ -13,9 +13,9 @@ M.SMOOTH = 4        -- segments either side, curvature smoothing
 M.LEAD = 3          -- segments the line leads the bend by
 M.LINE_GAIN = 900   -- m of lateral offset per 1/m of curvature
 M.MARGIN = 2.5      -- m kept from the walls
-M.GRIP = 0.85       -- of the steering authority a bend may take
+M.GRIP_MARGIN = 0.95 -- of the grip limit (physics A_GRIP) a bend may take
 M.V_CAP = 70        -- m/s: the profile never asks for more
-M.BRAKE_A = 18      -- m/s^2: the braking the profile plans with
+M.BRAKE_A = 20      -- m/s^2: the braking the profile plans with (the brake is 25)
 M.LOOK = 25         -- m: rejoin the target over this distance
 M.GAIN = 3.0        -- 1/s: heading error to yaw rate
 M.AHEAD = 2         -- segments: where the line and curvature are read
@@ -40,7 +40,7 @@ function M.prepare(tr, P)
         for d = -M.SMOOTH, M.SMOOTH do sum = sum + kr[(i - 1 + d + M.LEAD) % n + 1] end
         local lim = w[i] * 0.5 - M.MARGIN
         line.u[i] = clamp(sum / (2 * M.SMOOTH + 1) * M.LINE_GAIN, -lim, lim)
-        line.v[i] = min(M.V_CAP, M.GRIP * P.STEER_RATE / max(abs(kr[i]), 1e-4))
+        line.v[i] = min(M.V_CAP, sqrt(P.A_GRIP * M.GRIP_MARGIN / max(abs(kr[i]), 1e-4)))
     end
     for _ = 1, 2 do -- twice round, so braking carries over the start line
         for i = n, 1, -1 do
@@ -83,7 +83,7 @@ function M.controls(tr, line, ships, i, d, P, lead, out)
     out.steer = clamp(want / P.STEER_RATE, -1, 1)
     local vt = line.v[ahead] * d.skill
     out.thrust = s.v < vt
-    out.brake = s.v > vt + 5
+    out.brake = s.v > vt + 2
     out.abL, out.abR = false, false
     out.thrust_scale = d.skill * (1 + clamp(-lead / M.RB_DIST, -1, 1) * M.RB_MAX)
     return out

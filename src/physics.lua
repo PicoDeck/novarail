@@ -4,6 +4,11 @@
 -- to the track (radians, + = right), and an energy store that walls and
 -- collisions drain and the recharge strip refills; at zero the ship is out
 -- of the race (dnf) and gets no more thrust. One call steps one fixed dt.
+--
+-- Grip caps how hard steering can turn the ship at speed (a lateral
+-- acceleration, A_GRIP): too fast for a bend and the track turns away
+-- faster than the ship can follow, so it runs wide. Airbrakes turn it
+-- beyond that cap, at the cost of drag: the cornering skill.
 local track = require("src.track")
 
 local M = {}
@@ -17,10 +22,11 @@ M.P = {
     BRAKE = 25,        -- m/s^2
     G = 9.81,
     STEER_RATE = 1.7,  -- rad/s of heading change at full lock
+    A_GRIP = 34,       -- m/s^2: steering turns at most A_GRIP / v rad/s
     ALIGN = 0.6,       -- 1/s: with no steering, the heading eases back to the track's
     PSI_MAX = 1.1,     -- rad: the heading never turns further from the track than this
-    AB_YAW = 0.7,      -- rad/s of extra turn from one airbrake
-    AB_DRAG = 0.35,    -- 1/s, times v, per airbrake
+    AB_YAW = 0.25,     -- rad/s of extra turn from one airbrake, past the grip cap
+    AB_DRAG = 0.15,    -- 1/s, times v, per airbrake
     SHIP_HALF_W = 1.2, -- m
     WALL_LOSS = 0.5,   -- speed lost on a wall hit, times |sin(psi)|
     WALL_BOUNCE = 0.3, -- the heading reflects off a wall, scaled by this
@@ -73,8 +79,11 @@ function M.step(tr, s, c, dt)
     if v < 0 then v = 0 end
 
     local steer = c.steer or 0
-    local yaw = steer * P.STEER_RATE + (abr - abl) * P.AB_YAW
-    if steer == 0 then yaw = yaw - psi * P.ALIGN end
+    local yaw = steer * P.STEER_RATE
+    if steer == 0 then yaw = -psi * P.ALIGN end
+    local cap = P.A_GRIP / (v > 1 and v or 1)
+    if yaw > cap then yaw = cap elseif yaw < -cap then yaw = -cap end
+    yaw = yaw + (abr - abl) * P.AB_YAW
     local vf = v * cos(psi)
     psi = psi + (yaw - kr * vf) * dt
     if psi > P.PSI_MAX then psi = P.PSI_MAX elseif psi < -P.PSI_MAX then psi = -P.PSI_MAX end

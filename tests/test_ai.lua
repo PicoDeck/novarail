@@ -51,8 +51,17 @@ return {
         T.ok(line.u[at] * tr.kr[at] > 0, "inside: u " .. line.u[at] .. " kr " .. tr.kr[at])
         T.ok(math.abs(line.u[at]) > 2, "well off the centre line")
     end,
+    speed_profile_respects_grip = function()
+        for i = 1, tr.n do
+            T.ok(line.v[i] * line.v[i] * math.abs(tr.kr[i]) <= P.A_GRIP * ai.GRIP_MARGIN + 1e-3,
+                "segment " .. i .. " asks for more than grip: " .. line.v[i])
+        end
+        local best, at = 0, 1
+        for i = 1, tr.n do if math.abs(tr.kr[i]) > best then best, at = math.abs(tr.kr[i]), i end end
+        T.ok(line.v[at] < 52, "slows for the tightest bend: " .. line.v[at])
+    end,
     speed_profile_brakes_in_time = function()
-        local tight = F.circle(20, 8) -- tighter than the steering allows at the cap
+        local tight = F.circle(20, 8) -- grip allows about 25 m/s round it
         local l = ai.prepare(tight, P)
         for i = 1, tight.n do
             T.ok(l.v[i] <= ai.V_CAP + 1e-6)
