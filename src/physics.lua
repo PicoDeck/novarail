@@ -9,6 +9,11 @@
 -- acceleration, A_GRIP): too fast for a bend and the track turns away
 -- faster than the ship can follow, so it runs wide. Airbrakes turn it
 -- beyond that cap, at the cost of drag: the cornering skill.
+--
+-- A ship also slides sideways at vs m/s (a shove from another ship, a
+-- bounce off a wall), which grip bleeds away. A wall bounces the ship back
+-- towards the middle and costs speed and energy by how hard it was hit;
+-- scraping along it keeps costing, and a hard hit stuns the steering.
 local track = require("src.track")
 
 local M = {}
@@ -28,8 +33,16 @@ M.P = {
     AB_YAW = 0.25,     -- rad/s of extra turn from one airbrake, past the grip cap
     AB_DRAG = 0.15,    -- 1/s, times v, per airbrake
     SHIP_HALF_W = 1.2, -- m
-    WALL_LOSS = 0.5,   -- speed lost on a wall hit, times |sin(psi)|
+    A_SLIP = 20,       -- m/s^2: grip bleeds a sideways slide away at this rate
+    WALL_LOSS = 0.8,   -- speed lost on a wall hit, per m/s of speed into the wall
     WALL_BOUNCE = 0.3, -- the heading reflects off a wall, scaled by this
+    E_WALL = 0.35,     -- bounce: the speed into the wall comes back out times this
+    SCRAPE_DECEL = 12, -- m/s^2 while scraping (touched the wall in the last SCRAPE_HOLD)
+    SCRAPE_ENERGY = 6, -- energy per second while scraping
+    SCRAPE_HOLD = 0.25, -- s
+    STUN_WN = 8,       -- m/s into the wall: a harder hit stuns
+    STUN_TIME = 0.4,   -- s
+    STUN_STEER = 0.5,  -- steering is scaled by this while stunned
     HOVER_H = 1.0,     -- m: the hover spring's rest height
     HOVER_RANGE = 2.5, -- m: above this the spring lets go (airborne)
     HOVER_K = 60,      -- 1/s^2
@@ -38,18 +51,20 @@ M.P = {
     PAD_KICK = 12,     -- m/s added by a speed pad (once per pad)
     V_BOOST = 85,      -- m/s: a pad never lifts the speed above this
     ENERGY = 100,      -- a full energy store
-    WALL_DAMAGE = 1.2, -- energy lost per m/s of speed a wall takes
+    WALL_DAMAGE = 1.5, -- energy lost per m/s of speed into the wall
+    WALL_HIT_MAX = 25, -- the most energy one wall hit costs
     RECHARGE = 15,     -- energy per second on the recharge strip
 }
 
 function M.new_ship(seg, t, u)
     return { seg = seg or 1, t = t or 0, u = u or 0, h = M.P.HOVER_H, vh = 0,
-        v = 0, psi = 0, lap = 0, laps = 0, hit = false, pad = 0, air = false,
-        energy = M.P.ENERGY, dnf = false, impact = 0 }
+        v = 0, psi = 0, vs = 0, lap = 0, laps = 0, hit = false, pad = 0, air = false,
+        energy = M.P.ENERGY, dnf = false, impact = 0, stun = 0, scrape = 0 }
 end
 
 -- c = { steer = -1..1 (+ = right), thrust, brake, abL, abR, thrust_scale }.
--- Sets s.hit (touched a wall this step), s.impact (speed the wall took),
+-- Sets s.hit (hit a wall this step), s.impact (speed the wall took, scraping
+-- included),
 -- s.pad (id of the pad under the ship, or 0), s.air (above hover range) and
 -- s.laps (start-line crossings this step).
 function M.step(tr, s, c, dt)
@@ -67,7 +82,7 @@ function M.step(tr, s, c, dt)
     local ku = arr[seg] * f + arr[j] * t
     arr = tr.w
     local w = arr[seg] * f + arr[j] * t
-    local v, psi, h, vh = s.v, s.psi, s.h, s.vh
+    local v, psi, h, vh, vs, stun, scrape = s.v, s.psi, s.h, s.vh, s.vs, s.stun, s.scrape
     local air = h >= P.HOVER_RANGE
 
     local a = -P.DRAG * v * v - P.ROLL * v - P.G * ty
@@ -79,6 +94,11 @@ function M.step(tr, s, c, dt)
     if v < 0 then v = 0 end
 
     local steer = c.steer or 0
+    if stun > 0 then
+        steer = steer * P.STUN_STEER
+        stun = stun - dt
+        if stun < 0 then stun = 0 end
+    end
     local yaw = steer * P.STEER_RATE
     if steer == 0 then yaw = -psi * P.ALIGN end
     local cap = P.A_GRIP / (v > 1 and v or 1)
@@ -88,15 +108,40 @@ function M.step(tr, s, c, dt)
     psi = psi + (yaw - kr * vf) * dt
     if psi > P.PSI_MAX then psi = P.PSI_MAX elseif psi < -P.PSI_MAX then psi = -P.PSI_MAX end
 
-    local u = s.u + v * sin(psi) * dt
+    if vs > 0 then
+        vs = vs - P.A_SLIP * dt
+        if vs < 0 then vs = 0 end
+    elseif vs < 0 then
+        vs = vs + P.A_SLIP * dt
+        if vs > 0 then vs = 0 end
+    end
+    local u = s.u + (v * sin(psi) + vs) * dt
     local lim = w * 0.5 - P.SHIP_HALF_W
-    local hit, impact = false, 0
+    local hit, impact, damage = false, 0, 0
     if u > lim or u < -lim then
-        u = u > 0 and lim or -lim
-        impact = v * P.WALL_LOSS * abs(sin(psi))
-        v = v - impact
-        psi = -psi * P.WALL_BOUNCE
-        hit = true
+        local side = u > 0 and 1 or -1
+        u = side * lim
+        local wn = (v * sin(psi) + vs) * side -- speed into the wall
+        if wn > 0 then
+            hit = true
+            impact = P.WALL_LOSS * wn
+            if impact > v then impact = v end
+            v = v - impact
+            damage = P.WALL_DAMAGE * wn
+            if damage > P.WALL_HIT_MAX then damage = P.WALL_HIT_MAX end
+            if psi * side > 0 then psi = -psi * P.WALL_BOUNCE end
+            vs = -side * P.E_WALL * wn - v * sin(psi)
+            if wn > P.STUN_WN then stun = P.STUN_TIME end
+            scrape = P.SCRAPE_HOLD
+        end
+    end
+    if scrape > 0 then
+        local d = P.SCRAPE_DECEL * dt
+        if d > v then d = v end
+        v = v - d
+        impact = impact + d
+        damage = damage + P.SCRAPE_ENERGY * dt
+        scrape = scrape - dt
     end
 
     local laps
@@ -119,11 +164,12 @@ function M.step(tr, s, c, dt)
         s.pad = 0
     end
 
-    local energy = s.energy - impact * P.WALL_DAMAGE
+    local energy = s.energy - damage
     if tr.recharge[seg] and not s.dnf then energy = min(P.ENERGY, energy + P.RECHARGE * dt) end
     if energy <= 0 then energy, s.dnf = 0, true end
 
-    s.seg, s.t, s.u, s.h, s.vh, s.v, s.psi = seg, t, u, h, vh, v, psi
+    s.seg, s.t, s.u, s.h, s.vh, s.v, s.psi, s.vs = seg, t, u, h, vh, v, psi, vs
+    s.stun, s.scrape = stun, scrape
     s.hit, s.impact, s.air, s.laps, s.energy = hit, impact, h >= P.HOVER_RANGE, laps, energy
     s.lap = s.lap + laps
 end
