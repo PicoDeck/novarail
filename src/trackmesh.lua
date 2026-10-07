@@ -23,12 +23,14 @@ M.GROUND_Y = -18     -- m
 M.GROUND_W = 60      -- m
 M.CELL = 96          -- m
 -- Pylons under the road centre, where the road is high enough to show one.
-M.PYLON_EVERY = 8    -- segments
+-- Pylons and gantries come every 16 and 32 segments: at 8 and 16 the
+-- device's heaviest frames ran 0.9 ms over budget.
+M.PYLON_EVERY = 16   -- segments
 M.PYLON_MIN_H = 6    -- m of road above the ground
 M.PYLON_W = 1.6      -- m
 M.PYLON_TOP = 0.3    -- m under the road surface
 -- Gantries over the road: two legs and a glowing beam.
-M.GANTRY_EVERY = 16  -- segments
+M.GANTRY_EVERY = 32  -- segments
 M.GANTRY_H = 7.5     -- m: the beam's underside
 M.START_H = 9        -- m: the start gantry is taller
 M.BEAM = 0.5         -- m: beam depth

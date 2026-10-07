@@ -207,6 +207,9 @@ return {
     triangle_budget = function()
         local total = 0
         for _, ch in ipairs(mesh.chunks) do total = total + #ch.road[2] // 3 + #ch.ground[2] // 3 end
-        T.ok(total / tr.n <= 8, "triangles per segment " .. total / tr.n)
+        -- 7.6, not the spec's 8: the device gate measured the trackside
+        -- detail at 0.9 ms of the heaviest frames, so gantries and pylons
+        -- come half as often
+        T.ok(total / tr.n <= 7.6, "triangles per segment " .. total / tr.n)
     end,
 }

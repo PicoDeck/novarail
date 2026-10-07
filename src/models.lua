@@ -13,7 +13,7 @@ end
 
 -- Ship colours that do not depend on the team.
 local HULL, DARK, UNDER, DECK = rgb(110, 116, 150), rgb(40, 42, 66), rgb(26, 26, 44), rgb(30, 32, 52)
-local HOT, CYAN, WHITE = rgb(255, 240, 255), rgb(120, 240, 255), rgb(255, 255, 255)
+local HOT, CYAN = rgb(255, 240, 255), rgb(120, 240, 255)
 
 -- Builds one model: vertex, triangle, colour and flag lists for
 -- gfx3d.newMesh. double and glow are the gfx3d flags (DOUBLE_SIDED, and
@@ -77,9 +77,10 @@ local function builder(double, glow)
 end
 
 -- The player's ship: a long needle nose, swept wings with team-colour
--- upturned tips, twin team-colour fins, glowing leading edges (accent) and
--- white wingtip lights. 26 triangles.
-function M.needle(body, accent, double, glow)
+-- upturned tips, twin team-colour fins and a glowing engine. 22 triangles.
+-- No glowing edge slivers: anything much under 0.2 m across rasterises to
+-- a different scatter of pixels every frame and sparkles.
+function M.needle(body, double, glow)
     local b = builder(double, glow)
     b.loft({ 0, 0.2, -3.0 }, {
         { -1.1, { { -0.36, 0.1 }, { 0, -0.15 }, { 0.36, 0.1 }, { 0, 0.46 } } },
@@ -89,17 +90,15 @@ function M.needle(body, accent, double, glow)
     b.sheet({ 0.33, 0.08, -0.9 }, { 1.95, 0, 1.05 }, { 0.46, 0.08, 1.2 }, DARK)
     b.sheet({ 1.95, 0, 1.05 }, { 1.75, 0, 0.45 }, { 1.95, 0.55, 1.25 }, body)
     b.sheet({ 1.95, 0, 1.05 }, { 1.95, 0.55, 1.25 }, { 1.9, 0, 1.25 }, body)
-    b.sheet({ 1.92, 0.5, 1.15 }, { 1.98, 0.62, 1.3 }, { 1.9, 0.62, 1.32 }, WHITE, glow)
     b.sheet({ 0.28, 0.4, 0.5 }, { 0.3, 0.42, 1.2 }, { 0.42, 1.05, 1.35 }, body)
-    b.sheet({ 0.34, 0.08, -0.9 }, { 1.95, 0.02, 1.05 }, { 1.85, 0.05, 1.0 }, accent, glow)
     b.mirror(side)
     return b.done()
 end
 
 -- A rival: a slim grey fuselage with a glowing cyan canopy between two
--- team-colour engine pods on a dark wing; three glowing exhausts and an
--- accent stripe along each pod. 42 triangles.
-function M.twin_pod(body, accent, double, glow)
+-- team-colour engine pods on a dark wing, and three glowing exhausts.
+-- 40 triangles.
+function M.twin_pod(body, double, glow)
     local b = builder(double, glow)
     b.loft({ 0, 0.28, -2.5 }, {
         { -1.0, { { -0.5, 0.02 }, { 0.5, 0.02 }, { 0.32, 0.5 }, { -0.32, 0.5 } } },
@@ -114,15 +113,13 @@ function M.twin_pod(body, accent, double, glow)
     }, body, HOT, glow)
     b.sheet({ 0.5, 0.15, -0.5 }, { 1.3, 0.12, -0.1 }, { 1.26, 0.12, 1.2 }, DARK)
     b.sheet({ 0.5, 0.15, -0.5 }, { 1.26, 0.12, 1.2 }, { 0.55, 0.15, 1.2 }, DARK)
-    b.sheet({ 1.5, 0.40, -0.3 }, { 1.5, 0.48, 1.45 }, { 1.42, 0.44, 1.45 }, accent, glow)
     b.mirror(side)
     return b.done()
 end
 
 -- A rival: the greybox dart, re-lit: a team-colour top over a dark
--- underside, glowing accent leading edges, a cyan spine and a white-hot
--- engine plate. 13 triangles.
-function M.dart(body, accent, double, glow)
+-- underside and a white-hot engine plate. 10 triangles.
+function M.dart(body, double, glow)
     local b = builder(double, glow)
     local v = { { 0, 0.35, -2.4 }, { -1.3, 0, 1.2 }, { 1.3, 0, 1.2 }, { 0, 0.9, 0.9 },
         { 0, -0.25, 1.0 }, { -0.45, 0.2, 1.3 }, { 0.45, 0.2, 1.3 } }
@@ -133,9 +130,6 @@ function M.dart(body, accent, double, glow)
     b.tri(4, 6, 7, DECK)                               -- rear deck
     b.tri(2, 5, 6, UNDER); b.tri(3, 7, 5, UNDER)       -- rear lower wings
     b.tri(6, 5, 7, HOT, glow)                          -- engine plate
-    b.sheet({ 0, 0.37, -2.4 }, { -1.32, 0.02, 1.2 }, { -1.18, 0.12, 1.0 }, accent, glow)
-    b.sheet({ 0, 0.37, -2.4 }, { 1.32, 0.02, 1.2 }, { 1.18, 0.12, 1.0 }, accent, glow)
-    b.sheet({ 0, 0.37, -2.35 }, { 0.08, 0.86, 0.85 }, { -0.08, 0.86, 0.85 }, CYAN, glow)
     return b.done()
 end
 

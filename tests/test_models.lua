@@ -14,8 +14,11 @@ local function normal_and_centroid(v, a, b, c)
 end
 
 local DOUBLE, GLOW = 16, 3
-local BODY, ACCENT = 101, 102
-local SHIPS = { needle = 26, twin_pod = 42, dart = 13 }
+local BODY = 101
+local SHIPS = { needle = 22, twin_pod = 40, dart = 10 }
+-- A triangle narrower than this (about 3.5 pixels at the chase camera's
+-- 9 m) rasterises to a different scatter of pixels every frame: it sparkles.
+local SLIVER = 0.18 -- m
 
 -- The model's parts: groups of triangles joined by shared vertices.
 local function parts(t)
@@ -37,7 +40,7 @@ end
 return {
     ships_have_their_triangle_counts = function()
         for name, want in pairs(SHIPS) do
-            local v, t, c, f = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            local v, t, c, f = models[name](BODY, DOUBLE, GLOW)
             T.eq(#t // 3, want, name)
             T.eq(#c, want, name .. " colours"); T.eq(#f, want, name .. " flags")
             T.eq(#v % 3, 0)
@@ -46,7 +49,7 @@ return {
     end,
     ship_noses_point_minus_z = function()
         for name in pairs(SHIPS) do
-            local v = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            local v = models[name](BODY, DOUBLE, GLOW)
             local minz, x = math.huge, nil
             for i = 1, #v // 3 do
                 local vx, _, z = vert(v, i)
@@ -57,7 +60,7 @@ return {
     end,
     ship_hulls_are_closed_and_face_out = function()
         for name in pairs(SHIPS) do
-            local v, t, _, f = models[name](BODY, ACCENT, DOUBLE, GLOW)
+            local v, t, _, f = models[name](BODY, DOUBLE, GLOW)
             local find = parts(t)
             -- each part's centroid, over its one-sided triangles' vertices
             local sum, edges = {}, {}
@@ -90,20 +93,32 @@ return {
             end
         end
     end,
-    ships_wear_the_team_colours_and_glow = function()
+    ships_wear_the_team_colour_and_a_glowing_engine = function()
         for name in pairs(SHIPS) do
-            local _, t, c, f = models[name](BODY, ACCENT, DOUBLE, GLOW)
-            local body, accent, glow = 0, 0, 0
+            local _, t, c, f = models[name](BODY, DOUBLE, GLOW)
+            local body, glow = 0, 0
             for k = 1, #t // 3 do
                 if c[k] == BODY then body = body + 1 end
-                if c[k] == ACCENT then
-                    accent = accent + 1
-                    T.eq(f[k] & GLOW, GLOW, name .. ": the accent glows")
-                end
                 if f[k] & GLOW == GLOW then glow = glow + 1 end
             end
-            T.ok(body >= 2, name .. " body " .. body); T.ok(accent >= 1, name .. " accent")
-            T.ok(glow > accent, name .. ": the engine glows too")
+            T.ok(body >= 2, name .. " body " .. body)
+            T.ok(glow >= 1, name .. ": the engine glows")
+        end
+    end,
+    no_ship_triangle_is_a_sliver = function()
+        for name in pairs(SHIPS) do
+            local v, t = models[name](BODY, DOUBLE, GLOW)
+            for k = 1, #t // 3 do
+                local nx, ny, nz = normal_and_centroid(v, t[3 * k - 2], t[3 * k - 1], t[3 * k])
+                local longest = 0
+                for d = 0, 2 do
+                    local ax, ay, az = vert(v, t[3 * k - 2 + d])
+                    local bx, by, bz = vert(v, t[3 * k - 2 + (d + 1) % 3])
+                    longest = math.max(longest, math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2 + (bz - az) ^ 2))
+                end
+                local height = math.sqrt(nx * nx + ny * ny + nz * nz) / longest
+                T.ok(height >= SLIVER, name .. " triangle " .. k .. " is a sliver, " .. height .. " m across")
+            end
         end
     end,
     skyline_faces_the_centre = function()
