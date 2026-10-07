@@ -84,16 +84,37 @@ return {
     pinned_to_the_wall_by_a_rival = function()
         local phys = require("src.physics")
         local lim = tr.w[5] * 0.5 - P.SHIP_HALF_W
-        -- b rides the right wall; a, alongside, keeps steering into it
+        -- b rides the right wall; a holds station alongside it (thrust when
+        -- behind, brake when ahead, the player's two substeps), steering in
         local a, b = ship(5, 0.5, lim - collide.WID, 50), ship(5, 0.5, lim, 50)
+        local touching, slide, turn = 0, 0, 0
         for _ = 1, 60 do -- two seconds
-            phys.step(tr, a, { steer = 1, thrust = true }, 1 / 30)
+            local ahead = ((a.seg - b.seg) + (a.t - b.t)) * tr.len
+            local c = { steer = 1, thrust = ahead < 0, brake = ahead > 0.5 }
+            for _ = 1, 2 do phys.step(tr, a, c, 1 / 60) end
             phys.step(tr, b, { steer = 0, thrust = true }, 1 / 30)
             collide.resolve(tr, { a, b })
+            if b.bump then touching = touching + 1 end
+            slide, turn = math.max(slide, math.abs(a.vs)), math.max(turn, math.abs(a.psi))
         end
+        T.ok(touching >= 10, "it kept coming back for two seconds: " .. touching .. " contacts")
         T.ok(b.u <= lim + 1e-9, "still inside the wall")
         T.ok(b.energy >= P.ENERGY / 2, "the pinned ship keeps half its energy: " .. b.energy)
-        T.ok(a.energy < b.energy, "pinning costs the aggressor more: " .. a.energy)
+        T.ok(b.energy >= a.energy, "pinning never costs the victim more: " .. b.energy .. " vs " .. a.energy)
+        -- it bounces off the pinned ship as off a wall: no slide or heading
+        -- building up while it leans on it
+        T.ok(slide < 15, "the aggressor's slide stays sane: up to " .. slide)
+        T.ok(turn < phys.P.PSI_MAX - 0.1, "and its heading: up to " .. turn)
+    end,
+    ramming_a_pinned_ship_hurts_the_rammer = function()
+        local lim = tr.w[5] * 0.5 - P.SHIP_HALF_W
+        local a, b = ship(5, 0.5, lim - collide.WID + 0.5, 50), ship(5, 0.5, lim, 50)
+        a.vs = 12 -- slams sideways into b, which is against the wall
+        collide.resolve(tr, { a, b })
+        T.eq(b.energy, P.ENERGY, "the pinned ship takes nothing")
+        T.ok(a.energy < P.ENERGY, "the rammer pays: " .. a.energy)
+        T.eq(b.u, lim, "the pinned ship does not move")
+        T.ok(a.v * math.sin(a.psi) + a.vs < 0, "the rammer bounces off")
     end,
     sustained_side_contact_does_not_grind_energy_away = function()
         local a, b = ship(5, 0.5, 0, 50), ship(5, 0.5, 1, 50)
