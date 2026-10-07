@@ -1,5 +1,6 @@
 -- The results page after a race: positions, pilots, race and best-lap times.
 local fmt = require("src.fmt")
+local controls = require("src.controls")
 
 local M = {}
 
@@ -23,7 +24,8 @@ function M.draw(res)
         local line = string.format("%2d  %-6s  %s  %s", pos, M.NAMES[row.idx] or "?", time, fmt.time(row.best))
         disp.drawText(16, 64 + pos * 20, line, row.idx == 1 and HI or FG, BG)
     end
-    disp.drawText(40, 290, "ENTER  race again    ESC  quit", DIM, BG)
+    local again = controls.label(picocalc.gamepad.PAD_A) .. "  race again    ESC  quit"
+    disp.drawText(160 - disp.textWidth(again) // 2, 290, again, DIM, BG)
 end
 
 return M

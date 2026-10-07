@@ -1,6 +1,6 @@
 -- The race: the player and up to five rivals on track 1, a chase camera, a
--- HUD and a locked 30 fps loop; then the results page (Enter races again,
--- Esc quits). /data/<APP_ID>/dev.json switches on test modes:
+-- HUD and a locked 30 fps loop; then the results page (A or Start races
+-- again, Esc quits). /data/<APP_ID>/dev.json switches on test modes:
 --   autolap = true      the AI drives the player too; the app exits at the
 --                       results and writes perf.json (the hardware gate)
 --   stay = true         with autolap: show the results page and wait for a key
@@ -137,6 +137,8 @@ local function race_once(env)
     local st, hs = {}, { laps = env.laps, n = n }
     local P, dt, now = physics.P, 1 / M.FPS, sys.getTimeUs
     local frame, prev_t0, work = 0, nil, 0
+    -- no key for accelerate (unbound in Settings -> Controls): thrust on its own
+    local auto_thrust = not controls.bound(pc.gamepad.PAD_A)
     local bat0 = sys.getBattery()
     local usb0 = sys.isUSBPowered()
 
@@ -156,7 +158,7 @@ local function race_once(env)
             if env.auto or r.finish[1] or r.out[1] then
                 ai.controls(tr, env.line, ships, 1, drivers[1], P, 0, ctl[1])
             else
-                controls.read(ctl[1], true)
+                controls.read(ctl[1], auto_thrust)
                 ctl[1].thrust_scale = 1
             end
             -- Each rival re-plans every other frame (half of them per frame);
@@ -238,11 +240,11 @@ local function race_once(env)
         disp.flush()
     end
     input.clearState()
+    controls.arm_again()
     while true do
         input.update()
-        local pressed = input.getButtonsPressed()
-        if pressed & input.BTN_ENTER ~= 0 then return "again" end
-        if pressed & input.BTN_ESC ~= 0 then return "quit" end
+        if controls.again_pressed() then return "again" end
+        if input.getButtonsPressed() & input.BTN_ESC ~= 0 then return "quit" end
         sys.sleep(20)
     end
 end
