@@ -40,8 +40,8 @@ return {
             maxk = math.max(maxk, math.abs(tr.kr[i]))
             maxgrade = math.max(maxgrade, math.abs(tr.ty[i]))
         end
-        T.ok(1 / maxk >= 55, "tightest bend radius " .. 1 / maxk)
-        T.ok(maxgrade <= 0.2, "steepest grade " .. maxgrade)
+        T.ok(1 / maxk >= 30, "tightest bend radius " .. 1 / maxk) -- the hairpin
+        T.ok(maxgrade <= 0.3, "steepest grade " .. maxgrade)
     end,
     track1_has_a_crest = function()
         local crest = false

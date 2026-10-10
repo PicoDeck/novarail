@@ -37,15 +37,23 @@ def colours(png, box):
     return len(img.getcolors(maxcolors=320 * 320))
 
 
+def hold(sim, key, down):
+    """Hold or release a key: F4 is the gamepad's A (accelerate) and F5 its
+    B (brake) by default."""
+    sim.call("inject_button", {"button": key, "action": "press" if down else "release"})
+
+
 def test_race_runs_and_steers(novarail):
     sim, data = novarail(dev={"telemetry": True})
     sim.launch_app(APP)
     tel = data / "telemetry.json"
+    hold(sim, "f4", True)
     before = wait_json(tel, lambda d: d["frame"] >= 60 and d["v"] > 10)
-    sim.call("inject_button", {"button": "right", "action": "press"})
+    hold(sim, "right", True)
     time.sleep(0.8)
-    sim.call("inject_button", {"button": "right", "action": "release"})
+    hold(sim, "right", False)
     after = wait_json(tel, lambda d: d["frame"] > before["frame"] + 30)
+    hold(sim, "f4", False)
     assert after["u"] > before["u"] + 1.0, (before, after)
     png = sim.screenshot()
     assert colours(png, (0, 0, 320, 240)) >= 6, "the 3D viewport looks empty"
@@ -53,6 +61,24 @@ def test_race_runs_and_steers(novarail):
     sim.keypress("esc")
     res = sim.wait_for_exit(timeout=15)
     assert res["result"] == "returned", res
+    assert not lua_errors(sim)
+
+
+def test_no_thrust_without_a_and_b_brakes(novarail):
+    sim, data = novarail(dev={"telemetry": True})
+    sim.launch_app(APP)
+    tel = data / "telemetry.json"
+    idle = wait_json(tel, lambda d: d["frame"] >= 150)  # well past the countdown
+    assert idle["v"] < 1, idle                          # thrust is not automatic
+    hold(sim, "f4", True)
+    fast = wait_json(tel, lambda d: d["v"] > 30)
+    hold(sim, "f5", True)                               # B brakes, even with A held
+    slow = wait_json(tel, lambda d: d["frame"] > fast["frame"] + 30)
+    hold(sim, "f5", False)
+    hold(sim, "f4", False)
+    assert slow["v"] < fast["v"] - 10, (fast, slow)
+    sim.keypress("esc")
+    assert sim.wait_for_exit(timeout=15)["result"] == "returned"
     assert not lua_errors(sim)
 
 
@@ -104,6 +130,7 @@ def test_autolap_writes_perf_json(novarail):
     for key in ("work_us", "interval_us"):
         assert set(perf[key]) == {"min", "avg", "p95", "max"}, perf[key]
     assert perf["gfx3d"]["drawn_avg"] > 50, perf["gfx3d"]
+    assert perf["gfx3d"]["overflow"] == 0, perf["gfx3d"]
     assert perf["bench_sfx"] is False
     bat = perf["battery"]
     assert set(bat) == {"start", "finish", "usb_start", "usb_finish"}, bat
@@ -120,9 +147,11 @@ def test_autolap_writes_perf_json(novarail):
 def test_countdown_holds_the_grid(novarail):
     sim, data = novarail(dev={"telemetry": True})
     sim.launch_app(APP)
+    hold(sim, "f4", True)                   # accelerate held through the countdown
     early = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 30)
     assert early["phase"] == "countdown" and early["v"] == 0, early
     later = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 150)
+    hold(sim, "f4", False)
     assert later["phase"] == "racing" and later["v"] > 20, later
     sim.keypress("esc")
     assert sim.wait_for_exit(timeout=15)["result"] == "returned"
@@ -136,6 +165,7 @@ def test_results_page_then_race_again_or_quit(novarail):
     sim.launch_app(APP)
     tel = data / "telemetry.json"
     assert wait_json(tel, lambda d: d["frame"] >= 15)["track"] == 1
+    hold(sim, "f4", True)               # A held to the end (the AI drives regardless)
     # Alone on track, the player's finish ends the race at once: the results
     # page (a few flat colours, not the 3D view) replaces the race.
     deadline = time.monotonic() + 90
@@ -143,7 +173,11 @@ def test_results_page_then_race_again_or_quit(novarail):
         assert time.monotonic() < deadline, "no results page"
         time.sleep(0.5)
     first = json.loads(tel.read_text())["frame"]
-    sim.keypress("enter")               # race again: a new countdown, the next track
+    time.sleep(2)                       # A still held: its key repeat must not race again
+    assert colours(sim.screenshot(), (0, 0, 320, 240)) <= 8, "raced again on a held A"
+    hold(sim, "f4", False)
+    time.sleep(0.3)
+    sim.keypress("f4")                  # a fresh A races again: a new countdown, the next track
     again = wait_json(tel, lambda d: d["frame"] < first and d["phase"] == "countdown", timeout=20)
     assert again["track"] == 2 and again["music"] is True, again
     sim.keypress("esc")
@@ -174,7 +208,8 @@ def test_bad_laps_mean_one(novarail, laps):
 
 
 @pytest.mark.parametrize("prelude", ["picocalc.gfx3d = nil", "picocalc.gfx3d.drawList = nil",
-                                     "require = nil", "picocalc.sys.getTimeUs = nil"])
+                                     "require = nil", "picocalc.sys.getTimeUs = nil",
+                                     "picocalc.gamepad = nil"])
 def test_old_firmware_gets_a_message(novarail, prelude):
     # Firmware missing what the game needs: the app must explain, not raise.
     sim, _ = novarail(prelude=prelude)

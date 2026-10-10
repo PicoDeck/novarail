@@ -2,7 +2,8 @@
 -- track (so it follows bends and crests instead of cutting through them),
 -- held as a sprung offset from the ship; it looks ahead along the ship's
 -- heading, rolls with the track's banked up vector and widens its field of
--- view with speed.
+-- view with speed. A jolt (a wall hit, a shove) shakes the eye up and down
+-- on alternate frames, dying away in about half a second.
 local track = require("src.track")
 
 local M = {}
@@ -19,10 +20,15 @@ M.UP_SPRING = 4    -- 1/s: how fast the camera rolls to the track
 M.FOV = 1.0        -- rad, standing still
 M.FOV_SPEED = 0.25 -- rad added at V_REF
 M.V_REF = 70       -- m/s
+M.JOLT = 0.03      -- m of shake per m/s of hit
+M.MAX_SHAKE = 0.5  -- m
+M.SHAKE_DECAY = 10 -- 1/s
+M.SHAKE_MIN = 0.005 -- m: smaller shakes stop
 
 function M.new()
     return { ex = 0, ey = 0, ez = 0, tx = 0, ty = 0, tz = -1,
-        ux = 0, uy = 1, uz = 0, ox = 0, oy = 0, oz = 0, fov = M.FOV, ready = false }
+        ux = 0, uy = 1, uz = 0, ox = 0, oy = 0, oz = 0, fov = M.FOV, ready = false,
+        shake = 0, flip = 1 }
 end
 
 -- The ship's world position, forward vector (heading psi off the track)
@@ -62,6 +68,12 @@ function M.ship_pose(tr, s)
         tx * c + rx * sn, ty * c + ry * sn, tz * c + rz * sn, ux, uy, uz
 end
 
+-- A hit of `impact` m/s (speed lost to a wall, sideways speed from a shove).
+function M.jolt(cam, impact)
+    local a = cam.shake + impact * M.JOLT
+    cam.shake = a < M.MAX_SHAKE and a or M.MAX_SHAKE
+end
+
 function M.update(cam, tr, s, dt)
     local sx, sy, sz, fx, fy, fz, ux, uy, uz = M.ship_pose(tr, s)
     local bseg, bt = track.advance(tr, s.seg, s.t, -M.BACK)
@@ -84,6 +96,13 @@ function M.update(cam, tr, s, dt)
         cam.ux, cam.uy, cam.uz = nx * l, ny * l, nz * l
     end
     cam.ex, cam.ey, cam.ez = sx + cam.ox, sy + cam.oy, sz + cam.oz
+    if cam.shake > 0 then
+        local a = cam.shake * cam.flip
+        cam.ex, cam.ey, cam.ez = cam.ex + cam.ux * a, cam.ey + cam.uy * a, cam.ez + cam.uz * a
+        cam.flip = -cam.flip
+        cam.shake = cam.shake * exp(-M.SHAKE_DECAY * dt)
+        if cam.shake < M.SHAKE_MIN then cam.shake = 0 end
+    end
     local lx, ly, lz = sx + ux * M.LOOK_H, sy + uy * M.LOOK_H, sz + uz * M.LOOK_H
     cam.tx, cam.ty, cam.tz = lx + fx * M.AHEAD, ly + fy * M.AHEAD, lz + fz * M.AHEAD
     cam.fov = M.FOV + M.FOV_SPEED * min(1, s.v / M.V_REF)

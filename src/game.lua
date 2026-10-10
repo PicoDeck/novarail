@@ -1,6 +1,6 @@
 -- The race: the player and up to five rivals on track 1, a chase camera, a
--- HUD and a locked 30 fps loop; then the results page (Enter races again,
--- Esc quits). /data/<APP_ID>/dev.json switches on test modes:
+-- HUD and a locked 30 fps loop; then the results page (A or Start races
+-- again, Esc quits). /data/<APP_ID>/dev.json switches on test modes:
 --   autolap = true      the AI drives the player too; the app exits at the
 --                       results and writes perf.json (the hardware gate)
 --   stay = true         with autolap: show the results page and wait for a key
@@ -107,7 +107,8 @@ local function summary(log, g, sec, r, ships, env, frames, bat0, usb0)
         out.logged, out.missed, out.late = s.frames, s.missed, s.late
         out.work_us, out.interval_us = s.work_us, s.interval_us
         out.gfx3d = { us_geom_avg = g.geom // g.n, us_raster_avg = g.raster // g.n,
-            drawn_avg = g.drawn // g.n, drawn_max = g.drawn_max, tris_in_max = g.tris_max }
+            drawn_avg = g.drawn // g.n, drawn_max = g.drawn_max, tris_in_max = g.tris_max,
+            overflow = g.overflow }
         out.sections = { input = sec.input // g.n, sim = sec.sim // g.n, camera = sec.camera // g.n,
             draw = sec.draw // g.n, hud = sec.hud // g.n }
     end
@@ -132,11 +133,13 @@ local function race_once(env)
     local me, cam = ships[1], camera.new()
     local log = env.log
     if log then perflog.reset(log) end
-    local g = { geom = 0, raster = 0, drawn = 0, drawn_max = 0, tris_max = 0, n = 0 }
+    local g = { geom = 0, raster = 0, drawn = 0, drawn_max = 0, tris_max = 0, n = 0, overflow = 0 }
     local sec = { input = 0, sim = 0, camera = 0, draw = 0, hud = 0 }
     local st, hs = {}, { laps = env.laps, n = n }
     local P, dt, now = physics.P, 1 / M.FPS, sys.getTimeUs
     local frame, prev_t0, work = 0, nil, 0
+    -- no key for accelerate (unbound in Settings -> Controls): thrust on its own
+    local auto_thrust = not controls.bound(pc.gamepad.PAD_A)
     local bat0 = sys.getBattery()
     local usb0 = sys.isUSBPowered()
 
@@ -156,7 +159,7 @@ local function race_once(env)
             if env.auto or r.finish[1] or r.out[1] then
                 ai.controls(tr, env.line, ships, 1, drivers[1], P, 0, ctl[1])
             else
-                controls.read(ctl[1], true)
+                controls.read(ctl[1], auto_thrust)
                 ctl[1].thrust_scale = 1
             end
             -- Each rival re-plans every other frame (half of them per frame);
@@ -175,9 +178,17 @@ local function race_once(env)
             end
         end
         local tsim = now()
-        for _ = 1, M.SUBSTEPS do physics.step(tr, me, ctl[1], dt / M.SUBSTEPS) end
+        local e0, hit = me.energy, 0
+        for _ = 1, M.SUBSTEPS do
+            physics.step(tr, me, ctl[1], dt / M.SUBSTEPS)
+            hit = hit + me.impact
+        end
         for i = 2, n do physics.step(tr, ships[i], ctl[i], dt) end
+        local vs0 = me.vs
         collide.resolve(tr, ships)
+        hit = hit + math.abs(me.vs - vs0) -- a shove
+        if hit > 0 then camera.jolt(cam, hit) end
+        if me.energy < e0 - 0.5 then hud.flash(h) end
         race.update(r, ships)
         frame = frame + 1
         if r.phase == "results" then break end
@@ -207,6 +218,7 @@ local function race_once(env)
 
         local t1 = now()
         work = t1 - t0 -- integer subtraction: right across the 32-bit wrap
+        g.overflow = g.overflow + st.overflow -- every frame, warm-up included: the gate wants none
         if prev_t0 and frame > M.WARMUP then
             if log then perflog.add(log, work, t0 - prev_t0) end
             g.geom, g.raster, g.drawn = g.geom + st.us_geom, g.raster + st.us_raster, g.drawn + st.drawn
@@ -238,11 +250,11 @@ local function race_once(env)
         disp.flush()
     end
     input.clearState()
+    controls.arm_again()
     while true do
         input.update()
-        local pressed = input.getButtonsPressed()
-        if pressed & input.BTN_ENTER ~= 0 then return "again" end
-        if pressed & input.BTN_ESC ~= 0 then return "quit" end
+        if controls.again_pressed() then return "again" end
+        if input.getButtonsPressed() & input.BTN_ESC ~= 0 then return "quit" end
         sys.sleep(20)
     end
 end

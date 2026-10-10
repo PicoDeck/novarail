@@ -6,19 +6,25 @@ greybox build: one track, the player against five AI rivals, flat colours,
 and a locked 30 fps on the PicoCalc.
 
 Needs PicoDeck firmware 0.5.0 or newer (gfx3d with `drawList`, `require`,
-`sys.getTimeUs`, QOA music). It runs the CPU at 300 MHz (`system_clock_khz` in
-`app.json`): a race of six ships needs the headroom.
+`sys.getTimeUs`, the gamepad, QOA music). It runs the CPU at 300 MHz
+(`system_clock_khz` in `app.json`): a race of six ships needs the headroom.
 
 ## Controls
 
-| Key | Action |
-|---|---|
-| Left / Right | Steer |
-| Z / X | Left / right airbrake |
-| Down | Brake |
-| Esc | Quit |
+Nova Rail reads PicoDeck's gamepad, so players can rebind every button for
+it in Settings -> Controls (and a controller drives the same buttons).
 
-Thrust is automatic: the keyboard reports at most three keys at once.
+| Gamepad | Default key | Action |
+|---|---|---|
+| Left / Right | Left / Right | Steer |
+| A | F4 | Accelerate (hold) |
+| B | F5 | Brake |
+| L / R | F2 / F3 | Left / right airbrake |
+| A or Start | F4 / F1 | Race again (results page) |
+| | Esc | Quit |
+
+The keyboard reports at most three keys at once: steering, accelerate and
+one airbrake fit; braking means letting go of accelerate.
 
 ## Layout
 
@@ -47,13 +53,15 @@ sources.
 first): a two-lap race against five AI rivals, the player's ship driven by the
 AI, with the game's music and engine note plus six looping bench voices standing
 in for the effects still to come. It passes when no frame misses its 33.3 ms
-deadline or is shown late, the frame interval's p95 is at most 34 ms and the
-audio ISR stays under 2.4 ms. It sends nothing to the device during the race.
-Stop any other reader of the serial port first. The same tool installs the game
-with all its music for playing (`--install`) and measures battery drain
-(`--soak-stage`, then `--soak-read`; see its help). The on-device USB-power
-flag is not reliable, so `--soak-read` also refuses a run whose battery level
-did not fall.
+deadline or is shown late, the frame interval's p95 is at most 34 ms, the
+frame work's p95 is at most 24 ms (headroom for what P4b and P5 add), gfx3d
+drops no triangle and the audio ISR stays under 2.4 ms. It sends nothing to
+the device during the race. Stop any other reader of the serial port first.
+The same tool installs the game with all its music for playing (`--install`;
+about 12 minutes over serial, so copying the files over USB storage mode is
+quicker) and measures battery drain (`--soak-stage`, then `--soak-read`; see
+its help). The on-device USB-power flag is not reliable, so `--soak-read` also
+refuses a run whose battery level did not fall.
 
 ## Test modes
 
@@ -62,7 +70,8 @@ did not fall.
 - `"autolap": true`: the AI drives the player's ship too; the app exits when the
   race reaches its results and writes `perf.json` (frame work and interval
   min/avg/p95/max, missed and late frames, per-section timings, the player's
-  lap times, the finishing order, gfx3d stats, the battery level and USB power
+  lap times, the finishing order, gfx3d stats (with the triangles it dropped
+  over the race), the battery level and USB power
   at the start and the end, and what audio was playing when the race ended).
 - `"stay": true` (with autolap): show the results page and wait for a key
   instead of exiting.

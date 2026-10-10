@@ -20,9 +20,11 @@
    then deletes dev.json so the next launch from the launcher is a race.
 
 Gate: no logged frame misses its 33 333 us deadline or is shown late, the
-frame interval's p95 is at most 34 000 us, and the audio refill ISR's worst
-case stays under 2 400 us of its ~2 900 us period. Prints a verdict, writes
-reports/hw_lap-<time>.json and .png, and exits 1 if the gate fails.
+frame interval's p95 is at most 34 000 us, the frame work's p95 is at most
+24 000 us (headroom for P4b and P5), gfx3d drops no triangle, and the audio
+refill ISR's worst case stays under 2 400 us of its ~2 900 us period. Prints
+a verdict, writes reports/hw_lap-<time>.json and .png, and exits 1 if the
+gate fails.
 
 Other modes:
     --install            push the game with all its music, as a player gets
@@ -62,7 +64,7 @@ LAP_S = 40  # a lap takes about 37 s
 GATE_MISSED = 0
 GATE_INTERVAL_P95_US = 34000
 GATE_ISR_MAX_US = 2400
-WORK_P95_TARGET_US = 24000  # headroom P4b and P5 need at 300 MHz; reported, not gated
+GATE_WORK_P95_US = 24000  # headroom P4b and P5 need at 300 MHz
 # Output frames (44.1 kHz) the music stream may go without data before the
 # tool warns: 0.1 s is audible. Reported, not gated (PicoDeck issue #34).
 UNDERRUN_WARN_FRAMES = 4410
@@ -192,6 +194,13 @@ def verdict(perf: dict, audio) -> list:
         fails.append(f"frame interval p95 {perf['interval_us']['p95']} us > {GATE_INTERVAL_P95_US}")
     if audio is not None and audio.get("isr_max_us", 0) >= GATE_ISR_MAX_US:
         fails.append(f"audio ISR max {audio['isr_max_us']} us >= {GATE_ISR_MAX_US}")
+    if perf["work_us"]["p95"] > GATE_WORK_P95_US:
+        fails.append(f"frame work p95 {perf['work_us']['p95']} us > {GATE_WORK_P95_US}")
+    overflow = perf.get("gfx3d", {}).get("overflow")
+    if overflow is None:
+        fails.append("perf.json has no gfx3d overflow count")
+    elif overflow > 0:
+        fails.append(f"gfx3d dropped {overflow} triangles (more than 4096 in a frame)")
     return fails
 
 
@@ -317,7 +326,7 @@ def gate(args, audio: str):
     print(f"laps {perf.get('laps')} lap_ms {perf.get('lap_ms')} frames logged {perf.get('logged')}"
           f" rivals {perf.get('rivals')} audio {audio}")
     print(f"work_us     min {w.get('min')} avg {w.get('avg')} p95 {w.get('p95')} max {w.get('max')}"
-          f"  (headroom target p95 <= {WORK_P95_TARGET_US})")
+          f"  (gate p95 <= {GATE_WORK_P95_US})")
     print(f"interval_us min {i.get('min')} avg {i.get('avg')} p95 {i.get('p95')} max {i.get('max')}"
           f"  missed {perf.get('missed')} late {perf.get('late')}")
     print(f"sections {perf.get('sections')}")
@@ -326,8 +335,6 @@ def gate(args, audio: str):
     if audio != "none" and stats.get("stream_underruns", 0) > UNDERRUN_WARN_FRAMES:
         print(f"WARN: the music stream underran for {stats['stream_underruns']} output "
               "frames (PicoDeck issue #34)")
-    if w.get("p95", 0) > WORK_P95_TARGET_US:
-        print(f"WARN: work p95 {w.get('p95')} us leaves less headroom than the target")
     print(f"report: reports/hw_lap-{stamp}.json")
     if fails:
         print("GATE FAIL: " + "; ".join(fails))

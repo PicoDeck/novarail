@@ -22,6 +22,27 @@ return {
         local ax, ay, az = sub(cam.tx, cam.ty, cam.tz, sx, sy, sz)
         T.ok(dot(ax, ay, az, fx, fy, fz) > camera.AHEAD * 0.8, "looks ahead")
     end,
+    jolt_shakes_the_eye_then_settles = function()
+        local tr = F.track1()
+        local s = physics.new_ship(10, 0, 0)
+        local a, b = camera.new(), camera.new() -- b: never jolted
+        local function both() camera.update(a, tr, s, DT); camera.update(b, tr, s, DT) end
+        local function apart()
+            return math.sqrt((a.ex - b.ex) ^ 2 + (a.ey - b.ey) ^ 2 + (a.ez - b.ez) ^ 2)
+        end
+        for _ = 1, 30 do both() end
+        camera.jolt(a, 10) -- a 10 m/s hit
+        both()
+        T.ok(apart() > 0.1, "shaken: " .. apart())
+        for _ = 1, 15 do both() end -- half a second
+        T.ok(apart() < 1e-6, "settled: " .. apart())
+    end,
+    jolt_grows_with_the_hit_and_is_capped = function()
+        local small, big, huge = camera.new(), camera.new(), camera.new()
+        camera.jolt(small, 2); camera.jolt(big, 10); camera.jolt(huge, 100)
+        T.ok(small.shake < big.shake, "a harder hit shakes more")
+        T.eq(huge.shake, camera.MAX_SHAKE, "capped")
+    end,
     ship_pose_matches_the_track_frame = function()
         local tr = F.track1()
         local track = require("src.track")

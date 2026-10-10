@@ -7,7 +7,8 @@
 -- drawText costs ~76 us on the device (several times that inside a busy
 -- frame) and a full panel ~3.6 ms a frame. The text is refreshed on two
 -- frames out of every EVERY (one per buffer), so speed and times update
--- 7.5 times a second; the energy bar follows every frame.
+-- 7.5 times a second; the energy bar follows every frame, and turns white
+-- for FLASH frames after a hit that costs energy.
 local fmt = require("src.fmt")
 local sevenseg = require("src.sevenseg")
 
@@ -17,21 +18,30 @@ local disp = picocalc.display
 local rgb = disp.rgb
 
 local Y = 240
-local BG, FG, DIM, HI = rgb(16, 18, 30), rgb(230, 230, 240), rgb(130, 134, 160), rgb(250, 200, 60)
+-- The neon palette: a dark navy panel under a magenta edge, cyan accents.
+local BG, FG, DIM, HI = rgb(10, 12, 34), rgb(220, 230, 255), rgb(110, 120, 170), rgb(0, 220, 250)
+local EDGE = rgb(255, 60, 200)
 local BAR_X, BAR_Y, BAR_W, BAR_H = 224, Y + 42, 88, 8
-local BAR_BG = rgb(50, 52, 70)
-local E_HIGH, E_MID, E_LOW = rgb(80, 220, 110), rgb(240, 210, 60), rgb(240, 70, 60)
-local BIG = rgb(250, 220, 60)
+local BAR_BG = rgb(34, 36, 70)
+local E_HIGH, E_MID, E_LOW = rgb(0, 210, 245), rgb(255, 60, 200), rgb(255, 70, 60)
+local BIG = rgb(255, 60, 200)
+local FLASH_COL = rgb(255, 255, 255)
 
 M.EVERY = 4
+M.FLASH = 8
 
 function M.new()
-    return { frame = 0, cache = { {}, {} }, rects = {} }
+    return { frame = 0, cache = { {}, {} }, rects = {}, flash = 0 }
 end
 
 -- Forget what the buffers hold (after a full-screen page such as results).
 function M.reset(h)
-    h.frame, h.cache[1], h.cache[2] = 0, {}, {}
+    h.frame, h.cache[1], h.cache[2], h.flash = 0, {}, {}, 0
+end
+
+-- The energy bar flashes: a hit just cost energy.
+function M.flash(h)
+    h.flash = M.FLASH
 end
 
 local function field(c, key, x, y, text, fg)
@@ -47,6 +57,7 @@ function M.draw(h, st)
     h.frame = h.frame + 1
     if not c.panel then
         disp.fillRect(0, Y, 320, 80, BG)
+        disp.fillRect(0, Y, 320, 2, EDGE)
         disp.drawText(168, Y + 42, "ENERGY", DIM, BG)
         c.panel = true
     end
@@ -61,11 +72,15 @@ function M.draw(h, st)
     end
     local e = st.energy
     local fill = (e * BAR_W + 50) // 100
-    if c.bar ~= fill then
-        local col = e > 50 and E_HIGH or (e > 25 and E_MID or E_LOW)
+    local col = e > 50 and E_HIGH or (e > 25 and E_MID or E_LOW)
+    if h.flash > 0 then
+        col = FLASH_COL
+        h.flash = h.flash - 1
+    end
+    if c.bar ~= fill or c.bar_col ~= col then
         if fill > 0 then disp.fillRect(BAR_X, BAR_Y, fill, BAR_H, col) end
         if fill < BAR_W then disp.fillRect(BAR_X + fill, BAR_Y, BAR_W - fill, BAR_H, BAR_BG) end
-        c.bar = fill
+        c.bar, c.bar_col = fill, col
     end
 end
 
