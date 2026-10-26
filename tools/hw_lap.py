@@ -55,7 +55,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 APP, APP_ID = "novarail", "net.picodeck.novarail"
 APP_FILES = ("app.json", "main.lua", "src", "data")
-MUSIC = Path("assets/music/track01.qoa")
+MUSIC = Path("assets/music/track02.qoa")
 ENGINE = Path("assets/sfx/engine.wav")
 MUSIC_S = 20
 SFX_HZ = (523, 659, 784, 1047, 1319, 1568)

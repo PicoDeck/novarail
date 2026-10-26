@@ -54,13 +54,13 @@ class FakeTarget:
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     """A copy of the app's device files with stand-in `make assets` outputs:
-    a 23 s track01, a short track02 and an engine sample."""
+    a short track01, a 23 s track02 and an engine sample."""
     root = tmp_path / "repo"
     hw_lap.stage(root)
     (root / "assets" / "music").mkdir(parents=True)
     (root / "assets" / "sfx").mkdir(parents=True)
-    (root / "assets" / "music" / "track01.qoa").write_bytes(fake_qoa(200))
-    (root / "assets" / "music" / "track02.qoa").write_bytes(fake_qoa(3))
+    (root / "assets" / "music" / "track01.qoa").write_bytes(fake_qoa(3))
+    (root / "assets" / "music" / "track02.qoa").write_bytes(fake_qoa(200))
     (root / "assets" / "sfx" / "engine.wav").write_bytes(b"RIFF engine")
     monkeypatch.setattr(hw_lap, "REPO", root)
     return root
@@ -170,8 +170,8 @@ def test_bench_push_is_engine_and_voices_then_a_music_excerpt(repo):
     assert [f for f in first.files if f.startswith("bench/")] == \
         [f"bench/sfx{i}.wav" for i in range(1, 7)]
     assert not any(f.endswith(".qoa") for f in first.files)
-    assert second.files == ["app.json", "assets/music/track01.qoa"]
-    samples = qoa_samples(second.qoa["assets/music/track01.qoa"])
+    assert second.files == ["app.json", "assets/music/track02.qoa"]
+    samples = qoa_samples(second.qoa["assets/music/track02.qoa"])
     assert hw_lap.MUSIC_S * 44100 <= samples < hw_lap.MUSIC_S * 44100 + 5120
     assert second.manifest == first.manifest, "one app.json: no second reboot"
 

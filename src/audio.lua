@@ -9,7 +9,8 @@ local M = {}
 
 local sound, fs = picocalc.sound, picocalc.fs
 
-M.TRACKS = { "track01.qoa", "track02.qoa" }
+-- track01 is left out: its master clips.
+M.TRACKS = { "track02.qoa" }
 M.MUSIC_VOL = 55
 
 function M.new()

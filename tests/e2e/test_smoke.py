@@ -85,8 +85,7 @@ def test_no_thrust_without_a_and_b_brakes(novarail):
 def audio_assets(music_s=2.0):
     """Short stand-ins for the game's audio (the real files come from make
     assets): stereo 44.1 kHz QOA music, a WAV engine sample."""
-    return {"assets/music/track01.qoa": qoa_bytes(music_s, 220),
-            "assets/music/track02.qoa": qoa_bytes(music_s, 330),
+    return {"assets/music/track02.qoa": qoa_bytes(music_s, 330),
             "assets/sfx/engine.wav": wav_bytes(0.5, 110)}
 
 
@@ -177,9 +176,9 @@ def test_results_page_then_race_again_or_quit(novarail):
     assert colours(sim.screenshot(), (0, 0, 320, 240)) <= 8, "raced again on a held A"
     hold(sim, "f4", False)
     time.sleep(0.3)
-    sim.keypress("f4")                  # a fresh A races again: a new countdown, the next track
+    sim.keypress("f4")                  # a fresh A races again: a new countdown, the music restarts
     again = wait_json(tel, lambda d: d["frame"] < first and d["phase"] == "countdown", timeout=20)
-    assert again["track"] == 2 and again["music"] is True, again
+    assert again["track"] == 1 and again["music"] is True, again
     sim.keypress("esc")
     assert sim.wait_for_exit(timeout=15)["result"] == "returned"
     assert not lua_errors(sim)
