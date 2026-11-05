@@ -344,6 +344,25 @@ def test_race_failures_fail_missing_results():
     assert hw_lap.race_failures({"laps": 3}, 3)
 
 
+def test_race_clock_is_the_option_else_the_manifest(tmp_path):
+    (tmp_path / "app.json").write_text(json.dumps({"system_clock_khz": 300000}))
+    assert hw_lap.race_clock(200000, tmp_path) == 200000
+    assert hw_lap.race_clock(None, tmp_path) == 300000
+
+
+def test_a_race_that_died_says_why():
+    class Died:
+        def read_file(self, path):
+            if path.endswith("perf.json"):
+                raise FileNotFoundError(path)
+            return b"--- LUA ERROR [Old] ---\nold\n\n--- LUA ERROR [Nova Rail] ---\nrender.lua:98: NaN\n"
+
+    with pytest.raises(SystemExit) as e:
+        hw_lap.read_perf(Died())
+    assert "render.lua:98: NaN" in str(e.value)
+    assert "Old" not in str(e.value)
+
+
 def test_soak_stage_zero_is_refused(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv",
                         ["hw_lap.py", "--device", "/dev/null", "--soak-stage", "0"])

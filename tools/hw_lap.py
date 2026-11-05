@@ -259,6 +259,25 @@ def soak_summary(perf: dict, clock_khz) -> tuple:
             f"({per_hour:.0f}%/h)", report)
 
 
+def race_clock(clock_khz, repo: Path = REPO):
+    """The clock the race runs at: --clock, else the repo's app.json. Not
+    audiostat's sys_khz, which is read after the exit, back at the launcher's."""
+    if clock_khz is not None:
+        return clock_khz
+    return json.loads((repo / "app.json").read_text()).get("system_clock_khz")
+
+
+def read_perf(t) -> dict:
+    """perf.json, or why the race never wrote it: it is written at the finish, so
+    a race that died leaves its reason in the device's error log."""
+    try:
+        return json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
+    except FileNotFoundError:
+        log = t.read_file("/system/error.log").decode("latin1")
+        last = log[log.rfind("--- LUA ERROR"):].strip() if "--- LUA ERROR" in log else log[-300:]
+        raise SystemExit(f"hw_lap: the race wrote no perf.json. The device's last error:\n{last}")
+
+
 def write_report(reports: Path, name: str, report: dict):
     reports.mkdir(exist_ok=True)
     (reports / f"{name}.json").write_text(json.dumps(report, indent=2))
@@ -293,11 +312,11 @@ def gate(args, audio: str):
         t.delete_file(f"/data/{APP_ID}/perf.json")
 
         stats = measured_run(t, race_s=race_s)
-        perf = json.loads(t.read_file(f"/data/{APP_ID}/perf.json"))
+        perf = read_perf(t)
         # The measurement is saved before anything else can fail.
         write_report(reports, f"hw_lap-{stamp}", {"perf": perf, "audiostat": stats,
                                                   "laps": args.laps, "rivals": args.rivals,
-                                                  "audio": audio, "clock_khz": args.clock})
+                                                  "audio": audio, "clock_khz": race_clock(args.clock)})
 
         # A second, short run for the screenshot.
         t.write_file(f"/data/{APP_ID}/dev.json", json.dumps(
@@ -318,13 +337,13 @@ def gate(args, audio: str):
     write_report(reports, f"hw_lap-{stamp}", {"perf": perf, "audiostat": stats,
                                               "gate_failures": fails, "laps": args.laps,
                                               "rivals": args.rivals, "audio": audio,
-                                              "clock_khz": args.clock})
+                                              "clock_khz": race_clock(args.clock)})
     if shot:
         (reports / f"hw_lap-{stamp}.png").write_bytes(shot)
 
     w, i = perf.get("work_us", {}), perf.get("interval_us", {})
     print(f"laps {perf.get('laps')} lap_ms {perf.get('lap_ms')} frames logged {perf.get('logged')}"
-          f" rivals {perf.get('rivals')} audio {audio}")
+          f" rivals {perf.get('rivals')} audio {audio} clock {race_clock(args.clock)} kHz")
     print(f"work_us     min {w.get('min')} avg {w.get('avg')} p95 {w.get('p95')} max {w.get('max')}"
           f"  (gate p95 <= {GATE_WORK_P95_US})")
     print(f"interval_us min {i.get('min')} avg {i.get('avg')} p95 {i.get('p95')} max {i.get('max')}"
@@ -365,7 +384,7 @@ def soak_stage(args, audio: str):
         t.delete_file(f"/data/{APP_ID}/perf.json")
     finally:
         t.close()
-    clock = args.clock or json.loads((REPO / "app.json").read_text()).get("system_clock_khz")
+    clock = race_clock(args.clock)
     print(f"Armed: a {laps}-lap race (about {laps * LAP_S / 60:.0f} min) at {clock} kHz.")
     print("Unplug the USB cable, wait 10 s (the level is read every 5 s), launch Nova")
     print("Rail from the launcher, and plug the cable back in once it is back at the")
