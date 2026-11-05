@@ -7,13 +7,19 @@ local M = {}
 
 local g3 = picocalc.gfx3d
 local rgb = picocalc.display.rgb
+-- The per-frame calls, as upvalues: gfx3d is a table of 20-odd entries.
+local setProjection, lookAt, beginScene, endScene = g3.setProjection, g3.lookAt, g3.beginScene, g3.endScene
+local drawBackground, drawBasis, drawList = g3.drawBackground, g3.drawBasis, g3.drawList
+local ship_pose = camera.ship_pose
 
 M.VIEW_W, M.VIEW_H = 320, 240 -- the HUD panel takes the bottom 80 rows
-M.NEAR, M.FAR = 0.5, 260
+local NEAR <const>, FAR <const> = 0.5, 260
+M.NEAR, M.FAR = NEAR, FAR
 M.FOG_NEAR, M.FOG_FAR = 70, 250
-M.GROUND_BIAS = 60 -- m: the ground sorts behind the road beside it
-M.BEHIND = 30      -- m: a ship further behind the camera's ship is not drawn
-M.SHIP_FAR = 160   -- m: nor one further ahead (fog has it down to a speck)
+local GROUND_BIAS <const> = 60 -- m: the ground sorts behind the road beside it
+local BEHIND <const> = 30      -- m: a ship further behind the camera's ship is not drawn
+local SHIP_FAR <const> = 160   -- m: nor one further ahead (fog has it down to a speck)
+M.GROUND_BIAS, M.BEHIND, M.SHIP_FAR = GROUND_BIAS, BEHIND, SHIP_FAR
 
 local FOG = rgb(70, 24, 100) -- the night haze; glowing parts ignore it
 
@@ -88,29 +94,36 @@ end
 -- is the one the camera follows; a ship further than BEHIND behind it or
 -- SHIP_FAR ahead is skipped before any pose maths.
 function M.draw(scene, tr, ships, cam)
-    g3.setProjection(cam.fov, M.NEAR, M.FAR)
-    g3.lookAt(cam.ex, cam.ey, cam.ez, cam.tx, cam.ty, cam.tz, cam.ux, cam.uy, cam.uz)
-    g3.beginScene()
-    g3.drawBackground(scene.skyline)
+    setProjection(cam.fov, NEAR, FAR)
+    lookAt(cam.ex, cam.ey, cam.ez, cam.tx, cam.ty, cam.tz, cam.ux, cam.uy, cam.uz)
+    beginScene()
+    drawBackground(scene.skyline)
     local me = ships[1]
-    local len, half, total = tr.len, tr.total * 0.5, tr.total
-    for i = 1, #ships do
+    local mseg, mt = me.seg, me.t
+    local len, total = tr.len, tr.total
+    local half = total * 0.5
+    local meshes = scene.ships
+    local nm = #meshes
+    -- The camera already worked out the followed ship's pose this frame.
+    drawBasis(meshes[1], cam.sx, cam.sy, cam.sz, cam.sfx, cam.sfy, cam.sfz,
+        cam.sux, cam.suy, cam.suz, 1, 0, true)
+    for i = 2, #ships do
         local s = ships[i]
-        local ds = ((s.seg - me.seg) + (s.t - me.t)) * len
+        local ds = ((s.seg - mseg) + (s.t - mt)) * len
         if ds > half then ds = ds - total elseif ds < -half then ds = ds + total end
-        if ds > -M.BEHIND and ds < M.SHIP_FAR then
-            local sx, sy, sz, fx, fy, fz, ux, uy, uz = camera.ship_pose(tr, s)
-            local k = (i - 1) % #scene.ships + 1
-            g3.drawBasis(scene.ships[k], sx, sy, sz, fx, fy, fz, ux, uy, uz, 1, 0, true)
+        if ds > -BEHIND and ds < SHIP_FAR then
+            local sx, sy, sz, fx, fy, fz, ux, uy, uz = ship_pose(tr, s)
+            drawBasis(meshes[(i - 1) % nm + 1], sx, sy, sz, fx, fy, fz, ux, uy, uz, 1, 0, true)
         end
     end
     -- Every chunk, nearest first: from the one behind the ship's, forwards,
     -- in one drawList call per mesh set (a draw() per chunk cost ~4.7 ms a
     -- frame in Lua->C calls). gfx3d culls those outside the view or beyond FAR.
-    local first = (scene.of[me.seg] - 2) % #scene.roads + 1
-    g3.drawList(scene.roads, 0, first)
-    g3.drawList(scene.grounds, M.GROUND_BIAS, scene.gfirst[first])
-    g3.endScene()
+    local roads = scene.roads
+    local first = (scene.of[mseg] - 2) % #roads + 1
+    drawList(roads, 0, first)
+    drawList(scene.grounds, GROUND_BIAS, scene.gfirst[first])
+    endScene()
 end
 
 return M

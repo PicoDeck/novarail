@@ -18,49 +18,86 @@ local track = require("src.track")
 
 local M = {}
 
-local sin, cos, abs, min = math.sin, math.cos, math.abs, math.min
+local sin, cos, min = math.sin, math.cos, math.min
+
+-- Compile-time constants: the step reads them as VM constants rather than
+-- hashing into M.P some 20 times a call, 7 calls a frame. M.P is the public copy.
+local THRUST <const> = 20 -- m/s^2 while thrusting and within hover range
+local DRAG <const> = 0.005 -- 1/m, times v^2 (top speed ~ sqrt(THRUST / DRAG))
+local ROLL <const> = 0.02 -- 1/s, times v
+local BRAKE <const> = 25 -- m/s^2
+local G <const> = 9.81
+local STEER_RATE <const> = 1.7 -- rad/s of heading change at full lock
+local A_GRIP <const> = 34 -- m/s^2: steering turns at most A_GRIP / v rad/s
+local ALIGN <const> = 0.6 -- 1/s: with no steering, the heading eases back to the track's
+local PSI_MAX <const> = 1.1 -- rad: the heading never turns further from the track than this
+local AB_YAW <const> = 0.25 -- rad/s of extra turn from one airbrake, past the grip cap
+local AB_DRAG <const> = 0.15 -- 1/s, times v, per airbrake
+local SHIP_HALF_W <const> = 1.2 -- m
+local A_SLIP <const> = 20 -- m/s^2: grip bleeds a sideways slide away at this rate
+local WALL_LOSS <const> = 0.8 -- speed lost on a wall hit, per m/s of speed into the wall
+local WALL_BOUNCE <const> = 0.3 -- the heading reflects off a wall, scaled by this
+local E_WALL <const> = 0.35 -- bounce: the speed into the wall comes back out times this
+local SCRAPE_DECEL <const> = 12 -- m/s^2 while scraping (touched the wall in the last SCRAPE_HOLD)
+local SCRAPE_ENERGY <const> = 6 -- energy per second while scraping
+local SCRAPE_HOLD <const> = 0.25 -- s
+local SCRAPE_WN <const> = 2 -- m/s into the wall a scrape absorbs before it is a fresh hit
+local STUN_WN <const> = 8 -- m/s into the wall: a harder hit stuns
+local STUN_TIME <const> = 0.4 -- s
+local STUN_STEER <const> = 0.5 -- steering is scaled by this while stunned
+local HOVER_H <const> = 1.0 -- m: the hover spring's rest height
+local HOVER_RANGE <const> = 2.5 -- m: above this the spring lets go (airborne)
+local HOVER_K <const> = 60 -- 1/s^2
+local HOVER_C <const> = 11 -- 1/s
+local H_MIN <const> = 0.35 -- m: the hull never goes lower
+local PAD_KICK <const> = 12 -- m/s added by a speed pad (once per pad)
+local V_BOOST <const> = 85 -- m/s: a pad never lifts the speed above this
+local ENERGY <const> = 100 -- a full energy store
+local WALL_DAMAGE <const> = 1.5 -- energy lost per m/s of speed into the wall
+local WALL_HIT_MAX <const> = 25 -- the most energy one wall hit costs
+local RECHARGE <const> = 15 -- energy per second on the recharge strip
 
 M.P = {
-    THRUST = 20,       -- m/s^2 while thrusting and within hover range
-    DRAG = 0.005,      -- 1/m, times v^2 (top speed ~ sqrt(THRUST / DRAG))
-    ROLL = 0.02,       -- 1/s, times v
-    BRAKE = 25,        -- m/s^2
-    G = 9.81,
-    STEER_RATE = 1.7,  -- rad/s of heading change at full lock
-    A_GRIP = 34,       -- m/s^2: steering turns at most A_GRIP / v rad/s
-    ALIGN = 0.6,       -- 1/s: with no steering, the heading eases back to the track's
-    PSI_MAX = 1.1,     -- rad: the heading never turns further from the track than this
-    AB_YAW = 0.25,     -- rad/s of extra turn from one airbrake, past the grip cap
-    AB_DRAG = 0.15,    -- 1/s, times v, per airbrake
-    SHIP_HALF_W = 1.2, -- m
-    A_SLIP = 20,       -- m/s^2: grip bleeds a sideways slide away at this rate
-    WALL_LOSS = 0.8,   -- speed lost on a wall hit, per m/s of speed into the wall
-    WALL_BOUNCE = 0.3, -- the heading reflects off a wall, scaled by this
-    E_WALL = 0.35,     -- bounce: the speed into the wall comes back out times this
-    SCRAPE_DECEL = 12, -- m/s^2 while scraping (touched the wall in the last SCRAPE_HOLD)
-    SCRAPE_ENERGY = 6, -- energy per second while scraping
-    SCRAPE_HOLD = 0.25, -- s
-    SCRAPE_WN = 2,     -- m/s into the wall a scrape absorbs before it is a fresh hit
-    STUN_WN = 8,       -- m/s into the wall: a harder hit stuns
-    STUN_TIME = 0.4,   -- s
-    STUN_STEER = 0.5,  -- steering is scaled by this while stunned
-    HOVER_H = 1.0,     -- m: the hover spring's rest height
-    HOVER_RANGE = 2.5, -- m: above this the spring lets go (airborne)
-    HOVER_K = 60,      -- 1/s^2
-    HOVER_C = 11,      -- 1/s
-    H_MIN = 0.35,      -- m: the hull never goes lower
-    PAD_KICK = 12,     -- m/s added by a speed pad (once per pad)
-    V_BOOST = 85,      -- m/s: a pad never lifts the speed above this
-    ENERGY = 100,      -- a full energy store
-    WALL_DAMAGE = 1.5, -- energy lost per m/s of speed into the wall
-    WALL_HIT_MAX = 25, -- the most energy one wall hit costs
-    RECHARGE = 15,     -- energy per second on the recharge strip
+    THRUST = THRUST,
+    DRAG = DRAG,
+    ROLL = ROLL,
+    BRAKE = BRAKE,
+    G = G,
+    STEER_RATE = STEER_RATE,
+    A_GRIP = A_GRIP,
+    ALIGN = ALIGN,
+    PSI_MAX = PSI_MAX,
+    AB_YAW = AB_YAW,
+    AB_DRAG = AB_DRAG,
+    SHIP_HALF_W = SHIP_HALF_W,
+    A_SLIP = A_SLIP,
+    WALL_LOSS = WALL_LOSS,
+    WALL_BOUNCE = WALL_BOUNCE,
+    E_WALL = E_WALL,
+    SCRAPE_DECEL = SCRAPE_DECEL,
+    SCRAPE_ENERGY = SCRAPE_ENERGY,
+    SCRAPE_HOLD = SCRAPE_HOLD,
+    SCRAPE_WN = SCRAPE_WN,
+    STUN_WN = STUN_WN,
+    STUN_TIME = STUN_TIME,
+    STUN_STEER = STUN_STEER,
+    HOVER_H = HOVER_H,
+    HOVER_RANGE = HOVER_RANGE,
+    HOVER_K = HOVER_K,
+    HOVER_C = HOVER_C,
+    H_MIN = H_MIN,
+    PAD_KICK = PAD_KICK,
+    V_BOOST = V_BOOST,
+    ENERGY = ENERGY,
+    WALL_DAMAGE = WALL_DAMAGE,
+    WALL_HIT_MAX = WALL_HIT_MAX,
+    RECHARGE = RECHARGE,
 }
 
 function M.new_ship(seg, t, u)
-    return { seg = seg or 1, t = t or 0, u = u or 0, h = M.P.HOVER_H, vh = 0,
+    return { seg = seg or 1, t = t or 0, u = u or 0, h = HOVER_H, vh = 0,
         v = 0, psi = 0, vs = 0, lap = 0, laps = 0, hit = false, pad = 0, air = false,
-        energy = M.P.ENERGY, dnf = false, impact = 0, stun = 0, scrape = 0 }
+        energy = ENERGY, dnf = false, impact = 0, stun = 0, scrape = 0 }
 end
 
 -- c = { steer = -1..1 (+ = right), thrust, brake, abL, abR, thrust_scale }.
@@ -69,7 +106,6 @@ end
 -- s.pad (id of the pad under the ship, or 0), s.air (above hover range) and
 -- s.laps (start-line crossings this step).
 function M.step(tr, s, c, dt)
-    local P = M.P
     local seg, t = s.seg, s.t
     -- per-ring values at (seg, t), lerped inline (this runs 7 times a frame)
     local j, f = seg % tr.n + 1, 1 - t
@@ -84,40 +120,40 @@ function M.step(tr, s, c, dt)
     arr = tr.w
     local w = arr[seg] * f + arr[j] * t
     local v, psi, h, vh, vs, stun, scrape = s.v, s.psi, s.h, s.vh, s.vs, s.stun, s.scrape
-    local air = h >= P.HOVER_RANGE
+    local air = h >= HOVER_RANGE
 
-    local a = -P.DRAG * v * v - P.ROLL * v - P.G * ty
-    if c.thrust and not air and not s.dnf then a = a + P.THRUST * (c.thrust_scale or 1) end
-    if c.brake then a = a - P.BRAKE end
+    local a = -DRAG * v * v - ROLL * v - G * ty
+    if c.thrust and not air and not s.dnf then a = a + THRUST * (c.thrust_scale or 1) end
+    if c.brake then a = a - BRAKE end
     local abl, abr = c.abL and 1 or 0, c.abR and 1 or 0
-    a = a - (abl + abr) * P.AB_DRAG * v
+    a = a - (abl + abr) * AB_DRAG * v
     v = v + a * dt
     if v < 0 then v = 0 end
 
     local steer = c.steer or 0
     if stun > 0 then
-        steer = steer * P.STUN_STEER
+        steer = steer * STUN_STEER
         stun = stun - dt
         if stun < 0 then stun = 0 end
     end
-    local yaw = steer * P.STEER_RATE
-    if steer == 0 then yaw = -psi * P.ALIGN end
-    local cap = P.A_GRIP / (v > 1 and v or 1)
+    local yaw = steer * STEER_RATE
+    if steer == 0 then yaw = -psi * ALIGN end
+    local cap = A_GRIP / (v > 1 and v or 1)
     if yaw > cap then yaw = cap elseif yaw < -cap then yaw = -cap end
-    yaw = yaw + (abr - abl) * P.AB_YAW
+    yaw = yaw + (abr - abl) * AB_YAW
     local vf = v * cos(psi)
     psi = psi + (yaw - kr * vf) * dt
-    if psi > P.PSI_MAX then psi = P.PSI_MAX elseif psi < -P.PSI_MAX then psi = -P.PSI_MAX end
+    if psi > PSI_MAX then psi = PSI_MAX elseif psi < -PSI_MAX then psi = -PSI_MAX end
 
     if vs > 0 then
-        vs = vs - P.A_SLIP * dt
+        vs = vs - A_SLIP * dt
         if vs < 0 then vs = 0 end
     elseif vs < 0 then
-        vs = vs + P.A_SLIP * dt
+        vs = vs + A_SLIP * dt
         if vs > 0 then vs = 0 end
     end
     local u = s.u + (v * sin(psi) + vs) * dt
-    local lim = w * 0.5 - P.SHIP_HALF_W
+    local lim = w * 0.5 - SHIP_HALF_W
     local hit, impact, damage = false, 0, 0
     if u > lim or u < -lim then
         local side = u > 0 and 1 or -1
@@ -128,56 +164,63 @@ function M.step(tr, s, c, dt)
             -- Steering into the wall turns the ship back into it every
             -- step: while already scraping, only speed into the wall over
             -- SCRAPE_WN is a fresh hit (the scrape itself is billed below).
-            local fresh = scrape > 0 and wn - P.SCRAPE_WN or wn
+            local fresh = scrape > 0 and wn - SCRAPE_WN or wn
             if fresh > 0 then
-                impact = P.WALL_LOSS * fresh
+                impact = WALL_LOSS * fresh
                 if impact > v then impact = v end
                 v = v - impact
-                damage = P.WALL_DAMAGE * fresh
-                if damage > P.WALL_HIT_MAX then damage = P.WALL_HIT_MAX end
-                if fresh > P.STUN_WN then stun = P.STUN_TIME end
+                damage = WALL_DAMAGE * fresh
+                if damage > WALL_HIT_MAX then damage = WALL_HIT_MAX end
+                if fresh > STUN_WN then stun = STUN_TIME end
             end
-            if psi * side > 0 then psi = -psi * P.WALL_BOUNCE end
-            vs = -side * P.E_WALL * wn - v * sin(psi)
-            scrape = P.SCRAPE_HOLD
+            if psi * side > 0 then psi = -psi * WALL_BOUNCE end
+            vs = -side * E_WALL * wn - v * sin(psi)
+            scrape = SCRAPE_HOLD
         end
     end
     if scrape > 0 then
-        local d = P.SCRAPE_DECEL * dt
+        local d = SCRAPE_DECEL * dt
         if d > v then d = v end
         v = v - d
         impact = impact + d
-        damage = damage + P.SCRAPE_ENERGY * dt
+        damage = damage + SCRAPE_ENERGY * dt
         scrape = scrape - dt
     end
 
-    local laps
-    seg, t, laps = track.advance(tr, seg, t, vf * dt)
+    -- Staying in the segment needs no call; track.advance takes everything
+    -- else, a bad distance included.
+    local ds, laps = vf * dt, 0
+    local nt = t + ds / tr.len
+    if nt >= 0 and nt < 1 then
+        t = nt
+    else
+        seg, t, laps = track.advance(tr, seg, t, ds)
+    end
 
-    local ah = -P.G * uy - v * v * ku
-    if not air then ah = ah + P.HOVER_K * (P.HOVER_H - h) - P.HOVER_C * vh end
+    local ah = -G * uy - v * v * ku
+    if not air then ah = ah + HOVER_K * (HOVER_H - h) - HOVER_C * vh end
     vh = vh + ah * dt
     h = h + vh * dt
-    if h < P.H_MIN then
-        h = P.H_MIN
+    if h < H_MIN then
+        h = H_MIN
         if vh < 0 then vh = 0 end
     end
 
     local id = tr.padid[seg]
     if id and u >= tr.padlo[seg] and u <= tr.padhi[seg] then
-        if s.pad ~= id then v = min(v + P.PAD_KICK, P.V_BOOST) end
+        if s.pad ~= id then v = min(v + PAD_KICK, V_BOOST) end
         s.pad = id
     else
         s.pad = 0
     end
 
     local energy = s.energy - damage
-    if tr.recharge[seg] and not s.dnf then energy = min(P.ENERGY, energy + P.RECHARGE * dt) end
+    if tr.recharge[seg] and not s.dnf then energy = min(ENERGY, energy + RECHARGE * dt) end
     if energy <= 0 then energy, s.dnf = 0, true end
 
     s.seg, s.t, s.u, s.h, s.vh, s.v, s.psi, s.vs = seg, t, u, h, vh, v, psi, vs
     s.stun, s.scrape = stun, scrape
-    s.hit, s.impact, s.air, s.laps, s.energy = hit, impact, h >= P.HOVER_RANGE, laps, energy
+    s.hit, s.impact, s.air, s.laps, s.energy = hit, impact, h >= HOVER_RANGE, laps, energy
     s.lap = s.lap + laps
 end
 

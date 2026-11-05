@@ -8,27 +8,33 @@ local track = require("src.track")
 
 local M = {}
 
-local exp, sqrt, sin, cos, min = math.exp, math.sqrt, math.sin, math.cos, math.min
+local exp, sqrt, sin, cos = math.exp, math.sqrt, math.sin, math.cos
 
-M.BACK = 9         -- m behind the ship, along the track
-M.HEIGHT = 3.2     -- m above the surface
-M.FOLLOW_U = 0.7   -- how far the eye follows the ship's lateral offset
-M.AHEAD = 14       -- m ahead of the ship along its heading: the look target
-M.LOOK_H = 1.0     -- m above the ship: the look target
-M.SPRING = 8       -- 1/s: how fast the eye offset settles
-M.UP_SPRING = 4    -- 1/s: how fast the camera rolls to the track
-M.FOV = 1.0        -- rad, standing still
-M.FOV_SPEED = 0.25 -- rad added at V_REF
-M.V_REF = 70       -- m/s
-M.JOLT = 0.03      -- m of shake per m/s of hit
-M.MAX_SHAKE = 0.5  -- m
-M.SHAKE_DECAY = 10 -- 1/s
-M.SHAKE_MIN = 0.005 -- m: smaller shakes stop
+-- update() reads these as VM constants, not by hashing into M.
+local BACK <const> = 9         -- m behind the ship, along the track
+local HEIGHT <const> = 3.2     -- m above the surface
+local FOLLOW_U <const> = 0.7   -- how far the eye follows the ship's lateral offset
+local AHEAD <const> = 14       -- m ahead of the ship along its heading: the look target
+local LOOK_H <const> = 1.0     -- m above the ship: the look target
+local SPRING <const> = 8       -- 1/s: how fast the eye offset settles
+local UP_SPRING <const> = 4    -- 1/s: how fast the camera rolls to the track
+local FOV <const> = 1.0        -- rad, standing still
+local FOV_SPEED <const> = 0.25 -- rad added at V_REF
+local V_REF <const> = 70       -- m/s
+local JOLT <const> = 0.03      -- m of shake per m/s of hit
+local MAX_SHAKE <const> = 0.5  -- m
+local SHAKE_DECAY <const> = 10 -- 1/s
+local SHAKE_MIN <const> = 0.005 -- m: smaller shakes stop
+M.BACK, M.HEIGHT, M.FOLLOW_U, M.AHEAD, M.LOOK_H = BACK, HEIGHT, FOLLOW_U, AHEAD, LOOK_H
+M.SPRING, M.UP_SPRING, M.FOV, M.FOV_SPEED, M.V_REF = SPRING, UP_SPRING, FOV, FOV_SPEED, V_REF
+M.JOLT, M.MAX_SHAKE, M.SHAKE_DECAY, M.SHAKE_MIN = JOLT, MAX_SHAKE, SHAKE_DECAY, SHAKE_MIN
 
 function M.new()
     return { ex = 0, ey = 0, ez = 0, tx = 0, ty = 0, tz = -1,
-        ux = 0, uy = 1, uz = 0, ox = 0, oy = 0, oz = 0, fov = M.FOV, ready = false,
-        shake = 0, flip = 1 }
+        ux = 0, uy = 1, uz = 0, ox = 0, oy = 0, oz = 0, fov = FOV, ready = false,
+        shake = 0, flip = 1, dt = nil, k_eye = 0, k_up = 0, k_shake = 0,
+        -- the followed ship's pose this frame, for render to reuse
+        sx = 0, sy = 0, sz = 0, sfx = 0, sfy = 0, sfz = 0, sux = 0, suy = 0, suz = 0 }
 end
 
 -- The ship's world position, forward vector (heading psi off the track)
@@ -70,42 +76,53 @@ end
 
 -- A hit of `impact` m/s (speed lost to a wall, sideways speed from a shove).
 function M.jolt(cam, impact)
-    local a = cam.shake + impact * M.JOLT
-    cam.shake = a < M.MAX_SHAKE and a or M.MAX_SHAKE
+    local a = cam.shake + impact * JOLT
+    cam.shake = a < MAX_SHAKE and a or MAX_SHAKE
 end
 
 function M.update(cam, tr, s, dt)
     local sx, sy, sz, fx, fy, fz, ux, uy, uz = M.ship_pose(tr, s)
-    local bseg, bt = track.advance(tr, s.seg, s.t, -M.BACK)
-    local ex, ey, ez = track.point(tr, bseg, bt, s.u * M.FOLLOW_U, M.HEIGHT)
+    cam.sx, cam.sy, cam.sz, cam.sfx, cam.sfy, cam.sfz = sx, sy, sz, fx, fy, fz
+    cam.sux, cam.suy, cam.suz = ux, uy, uz
+    local bseg, bt = track.advance(tr, s.seg, s.t, -BACK)
+    local ex, ey, ez = track.point(tr, bseg, bt, s.u * FOLLOW_U, HEIGHT)
     local ox, oy, oz = ex - sx, ey - sy, ez - sz
+    if cam.dt ~= dt then -- the spring factors depend only on dt, which is fixed
+        cam.dt, cam.k_eye, cam.k_up = dt, 1 - exp(-SPRING * dt), 1 - exp(-UP_SPRING * dt)
+        cam.k_shake = exp(-SHAKE_DECAY * dt)
+    end
     if not cam.ready then
         cam.ox, cam.oy, cam.oz = ox, oy, oz
         cam.ux, cam.uy, cam.uz = ux, uy, uz
         cam.ready = true
     else
-        local k = 1 - exp(-M.SPRING * dt)
-        cam.ox = cam.ox + (ox - cam.ox) * k
-        cam.oy = cam.oy + (oy - cam.oy) * k
-        cam.oz = cam.oz + (oz - cam.oz) * k
-        k = 1 - exp(-M.UP_SPRING * dt)
-        local nx = cam.ux + (ux - cam.ux) * k
-        local ny = cam.uy + (uy - cam.uy) * k
-        local nz = cam.uz + (uz - cam.uz) * k
+        local k = cam.k_eye
+        local cx, cy, cz = cam.ox, cam.oy, cam.oz
+        cam.ox = cx + (ox - cx) * k
+        cam.oy = cy + (oy - cy) * k
+        cam.oz = cz + (oz - cz) * k
+        k = cam.k_up
+        cx, cy, cz = cam.ux, cam.uy, cam.uz
+        local nx = cx + (ux - cx) * k
+        local ny = cy + (uy - cy) * k
+        local nz = cz + (uz - cz) * k
         local l = 1 / sqrt(nx * nx + ny * ny + nz * nz)
         cam.ux, cam.uy, cam.uz = nx * l, ny * l, nz * l
     end
-    cam.ex, cam.ey, cam.ez = sx + cam.ox, sy + cam.oy, sz + cam.oz
-    if cam.shake > 0 then
-        local a = cam.shake * cam.flip
-        cam.ex, cam.ey, cam.ez = cam.ex + cam.ux * a, cam.ey + cam.uy * a, cam.ez + cam.uz * a
+    local cex, cey, cez = sx + cam.ox, sy + cam.oy, sz + cam.oz
+    local shake = cam.shake
+    if shake > 0 then
+        local a = shake * cam.flip
+        cex, cey, cez = cex + cam.ux * a, cey + cam.uy * a, cez + cam.uz * a
         cam.flip = -cam.flip
-        cam.shake = cam.shake * exp(-M.SHAKE_DECAY * dt)
-        if cam.shake < M.SHAKE_MIN then cam.shake = 0 end
+        shake = shake * cam.k_shake
+        cam.shake = shake < SHAKE_MIN and 0 or shake
     end
-    local lx, ly, lz = sx + ux * M.LOOK_H, sy + uy * M.LOOK_H, sz + uz * M.LOOK_H
-    cam.tx, cam.ty, cam.tz = lx + fx * M.AHEAD, ly + fy * M.AHEAD, lz + fz * M.AHEAD
-    cam.fov = M.FOV + M.FOV_SPEED * min(1, s.v / M.V_REF)
+    cam.ex, cam.ey, cam.ez = cex, cey, cez
+    local lx, ly, lz = sx + ux * LOOK_H, sy + uy * LOOK_H, sz + uz * LOOK_H
+    cam.tx, cam.ty, cam.tz = lx + fx * AHEAD, ly + fy * AHEAD, lz + fz * AHEAD
+    local f = s.v / V_REF
+    cam.fov = FOV + FOV_SPEED * (f < 1 and f or 1)
 end
 
 return M

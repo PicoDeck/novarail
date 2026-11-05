@@ -165,4 +165,32 @@ return {
     ms_from_frames = function()
         T.eq(race.ms(30), 1000); T.eq(race.ms(45), 1500); T.eq(race.ms(nil), nil)
     end,
+    position_is_where_standings_puts_the_ship = function()
+        -- finishers, running ships, retired ships and exact ties, in many mixes
+        local seed = 12345
+        local function rnd(k)
+            seed = (seed * 1103 + 12345) % 65536
+            return seed % k
+        end
+        for _ = 1, 300 do
+            local r, ships = race.new(tr, 6, 3)
+            for k = 1, 6 do
+                local s = ships[k]
+                s.lap, s.seg, s.t = rnd(3), 1 + rnd(4) * 40, rnd(2) * 0.5
+            end
+            for k = 1, 6 do
+                local kind = rnd(5)
+                if kind == 0 then
+                    r.finish[k] = 100 + k
+                    r.order[#r.order + 1] = k
+                elseif kind == 1 then
+                    r.out[k] = true
+                end
+            end
+            local order = race.standings(r, tr, ships, {})
+            for pos = 1, 6 do
+                T.eq(race.position(r, tr, ships, order[pos]), pos, "ship " .. order[pos])
+            end
+        end
+    end,
 }

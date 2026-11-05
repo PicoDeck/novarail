@@ -19,15 +19,18 @@ M.APEX_MARGIN = 4   -- m kept from the inside wall of a bend
 M.GRIP_MARGIN = 0.95 -- of the grip limit (physics A_GRIP) a bend may take
 M.V_CAP = 70        -- m/s: the profile never asks for more
 M.BRAKE_A = 20      -- m/s^2: the braking the profile plans with (the brake is 25)
-M.LOOK = 25         -- m: rejoin the target over this distance
-M.GAIN = 3.0        -- 1/s: heading error to yaw rate
-M.AHEAD = 2         -- segments: where the line and curvature are read
-M.AVOID_DIST = 22   -- m: a slower ship this close ahead...
-M.AVOID_LANE = 3    -- m: ...and this close to the target lane is avoided
-M.AVOID_SHIFT = 4.5 -- m: pass it this far to the side
-M.SIDE_GAP = 4.0    -- m: a ship alongside closer than this is steered away from
-M.RB_DIST = 250     -- m of lead (or lag) for the full rubber-band effect
-M.RB_MAX = 0.10     -- thrust fraction rubber-banding adds or takes
+-- controls() reads these as VM constants, not by hashing into M.
+local LOOK <const> = 25         -- m: rejoin the target over this distance
+local GAIN <const> = 3.0        -- 1/s: heading error to yaw rate
+local AHEAD <const> = 2         -- segments: where the line and curvature are read
+local AVOID_DIST <const> = 22   -- m: a slower ship this close ahead...
+local AVOID_LANE <const> = 3    -- m: ...and this close to the target lane is avoided
+local AVOID_SHIFT <const> = 4.5 -- m: pass it this far to the side
+local SIDE_GAP <const> = 4.0    -- m: a ship alongside closer than this is steered away from
+local RB_DIST <const> = 250     -- m of lead (or lag) for the full rubber-band effect
+local RB_MAX <const> = 0.10     -- thrust fraction rubber-banding adds or takes
+M.LOOK, M.GAIN, M.AHEAD, M.AVOID_DIST, M.AVOID_LANE = LOOK, GAIN, AHEAD, AVOID_DIST, AVOID_LANE
+M.AVOID_SHIFT, M.SIDE_GAP, M.RB_DIST, M.RB_MAX = AVOID_SHIFT, SIDE_GAP, RB_DIST, RB_MAX
 
 local function clamp(v, lo, hi)
     if v < lo then return lo elseif v > hi then return hi end
@@ -70,30 +73,49 @@ end
 -- (negative when behind).
 function M.controls(tr, line, ships, i, d, P, lead, out)
     local s = ships[i]
+    local sseg, st, su, sv = s.seg, s.t, s.u, s.v
     local n, len, half = tr.n, tr.len, tr.total * 0.5
-    local ahead = (s.seg - 1 + M.AHEAD) % n + 1
+    local whole, nhalf = 2 * half, -half
+    local ahead = (sseg - 1 + AHEAD) % n + 1
     local lo, hi = line.lo[ahead], line.hi[ahead]
-    local target = clamp(line.u[ahead] + d.bias, lo, hi)
+    local target = line.u[ahead] + d.bias
+    if target < lo then target = lo elseif target > hi then target = hi end
+    local vlimit = sv + 1
     for j = 1, #ships do
         local o = ships[j]
-        if j ~= i and o.v < s.v + 1 then
-            local ds = ((o.seg - s.seg) + (o.t - s.t)) * len
-            if ds > half then ds = ds - 2 * half elseif ds < -half then ds = ds + 2 * half end
-            if ds > 0 and ds < M.AVOID_DIST and abs(o.u - target) < M.AVOID_LANE then
-                target = clamp(o.u > 0 and o.u - M.AVOID_SHIFT or o.u + M.AVOID_SHIFT, lo, hi)
-            elseif ds > -5 and ds < 5 and abs(o.u - s.u) < M.SIDE_GAP then
-                -- alongside: keep a lane's width from it
-                target = clamp(o.u > s.u and o.u - M.SIDE_GAP or o.u + M.SIDE_GAP, lo, hi)
+        local ov = o.v
+        if ov < vlimit and j ~= i then
+            local ds = ((o.seg - sseg) + (o.t - st)) * len
+            if ds > half then ds = ds - whole elseif ds < nhalf then ds = ds + whole end
+            -- Only a ship within AVOID_DIST or alongside goes further: most
+            -- are not, so a far one reads no lateral place and calls nothing.
+            if ds > -5 and ds < AVOID_DIST then
+                local ou = o.u
+                local d1 = ou - target
+                if ds > 0 and (d1 < 0 and -d1 or d1) < AVOID_LANE then
+                    target = clamp(ou > 0 and ou - AVOID_SHIFT or ou + AVOID_SHIFT, lo, hi)
+                elseif ds < 5 then
+                    local d2 = ou - su
+                    if (d2 < 0 and -d2 or d2) < SIDE_GAP then
+                        -- alongside: keep a lane's width from it
+                        target = clamp(ou > su and ou - SIDE_GAP or ou + SIDE_GAP, lo, hi)
+                    end
+                end
             end
         end
     end
-    local want = (atan(target - s.u, M.LOOK) - s.psi) * M.GAIN + tr.kr[ahead] * s.v
-    out.steer = clamp(want / P.STEER_RATE, -1, 1)
-    local vt = line.v[ahead] * d.skill
-    out.thrust = s.v < vt
-    out.brake = s.v > vt + 2
+    local want = (atan(target - su, LOOK) - s.psi) * GAIN + tr.kr[ahead] * sv
+    want = want / P.STEER_RATE
+    if want < -1 then want = -1 elseif want > 1 then want = 1 end
+    out.steer = want
+    local skill = d.skill
+    local vt = line.v[ahead] * skill
+    out.thrust = sv < vt
+    out.brake = sv > vt + 2
     out.abL, out.abR = false, false
-    out.thrust_scale = d.skill * (1 + clamp(-lead / M.RB_DIST, -1, 1) * M.RB_MAX)
+    local rb = -lead / RB_DIST
+    if rb < -1 then rb = -1 elseif rb > 1 then rb = 1 end
+    out.thrust_scale = skill * (1 + rb * RB_MAX)
     return out
 end
 

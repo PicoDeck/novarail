@@ -14,10 +14,11 @@ local physics = require("src.physics")
 
 local M = {}
 
-local abs, sin = math.abs, math.sin
+local sin = math.sin
 
-M.LEN = 4.0          -- m along the track
-M.WID = 2.4          -- m across
+local LEN <const> = 4.0 -- m along the track
+local WID <const> = 2.4 -- m across
+M.LEN, M.WID = LEN, WID
 M.SHARE = 0.5        -- of the closing speed, taken from the ship behind
 M.PASS = 0.3         -- of the closing speed, given to the ship ahead
 M.DAMAGE = 1.0       -- energy per m/s of closing speed, nose to tail
@@ -52,20 +53,26 @@ end
 
 function M.resolve(tr, ships)
     local n, len, total, half = #ships, tr.len, tr.total, tr.total * 0.5
+    local nhalf = -half
     for i = 1, n do
         local s = ships[i]
         s.bump = false
-        if (s.cooldown or 0) > 0 then s.cooldown = s.cooldown - 1 end
+        local cd = s.cooldown
+        if cd and cd > 0 then s.cooldown = cd - 1 end
     end
+    -- 15 pairs a frame, nearly all of them far apart: a pair costs no C call
+    -- and reads only its places until it is within LEN along the track.
     for i = 1, n - 1 do
         local a = ships[i]
+        local aseg, at = a.seg, a.t -- re-read below after a contact moves a
         for j = i + 1, n do
             local b = ships[j]
-            local ds = ((b.seg - a.seg) + (b.t - a.t)) * len
-            if ds > half then ds = ds - total elseif ds < -half then ds = ds + total end
+            local ds = ((b.seg - aseg) + (b.t - at)) * len
+            if ds > half then ds = ds - total elseif ds < nhalf then ds = ds + total end
+            if not (ds < LEN and ds > -LEN) then goto next_pair end
             local du = b.u - a.u
-            local ox, oy = M.LEN - abs(ds), M.WID - abs(du)
-            if ox > 0 and oy > 0 then
+            local ox, oy = LEN - (ds < 0 and -ds or ds), WID - (du < 0 and -du or du)
+            if oy > 0 then
                 a.bump, b.bump = true, true
                 if oy <= ox then
                     local towards = du >= 0 and 1 or -1 -- the side b is on, seen from a
@@ -123,7 +130,7 @@ function M.resolve(tr, ships)
                         front.v = front.v + closing * M.PASS
                         if closing > M.MIN_CLOSING then
                             -- off-centre: the headings twitch apart, by the offset
-                            local tw = M.K_YAW * closing * (front.u - back.u) / M.WID
+                            local tw = M.K_YAW * closing * (front.u - back.u) / WID
                             if tw > M.MAX_TWITCH then tw = M.MAX_TWITCH
                             elseif tw < -M.MAX_TWITCH then tw = -M.MAX_TWITCH end
                             front.psi, back.psi = front.psi + tw, back.psi - tw
@@ -134,7 +141,9 @@ function M.resolve(tr, ships)
                         end
                     end
                 end
+                aseg, at = a.seg, a.t
             end
+            ::next_pair::
         end
     end
 end

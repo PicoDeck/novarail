@@ -3,12 +3,14 @@
 -- ring seg % n + 1; the start line is ring 1.
 local M = {}
 
-local sqrt, abs = math.sqrt, math.abs
+local sqrt = math.sqrt
 
 -- Moves ds metres along the centre line. Returns seg, t and the number of
 -- times the start line was crossed (+1 forwards, -1 backwards).
 function M.advance(tr, seg, t, ds)
-    assert(ds == ds and abs(ds) < tr.total, "track.advance: bad distance")
+    -- not assert(): every ship calls this every frame, and each C call counts
+    local total = tr.total
+    if not (ds < total and ds > -total) then error("track.advance: bad distance", 0) end
     local n = tr.n
     local laps = 0
     t = t + ds / tr.len
@@ -34,15 +36,24 @@ end
 function M.frame(tr, seg, t)
     local j = seg % tr.n + 1
     local f = 1 - t
-    local px = tr.px[seg] * f + tr.px[j] * t
-    local py = tr.py[seg] * f + tr.py[j] * t
-    local pz = tr.pz[seg] * f + tr.pz[j] * t
-    local tx = tr.tx[seg] * f + tr.tx[j] * t
-    local ty = tr.ty[seg] * f + tr.ty[j] * t
-    local tz = tr.tz[seg] * f + tr.tz[j] * t
-    local ux = tr.ux[seg] * f + tr.ux[j] * t
-    local uy = tr.uy[seg] * f + tr.uy[j] * t
-    local uz = tr.uz[seg] * f + tr.uz[j] * t
+    local a = tr.px
+    local px = a[seg] * f + a[j] * t
+    a = tr.py
+    local py = a[seg] * f + a[j] * t
+    a = tr.pz
+    local pz = a[seg] * f + a[j] * t
+    a = tr.tx
+    local tx = a[seg] * f + a[j] * t
+    a = tr.ty
+    local ty = a[seg] * f + a[j] * t
+    a = tr.tz
+    local tz = a[seg] * f + a[j] * t
+    a = tr.ux
+    local ux = a[seg] * f + a[j] * t
+    a = tr.uy
+    local uy = a[seg] * f + a[j] * t
+    a = tr.uz
+    local uz = a[seg] * f + a[j] * t
     local l = 1 / sqrt(tx * tx + ty * ty + tz * tz)
     tx, ty, tz = tx * l, ty * l, tz * l
     l = 1 / sqrt(ux * ux + uy * uy + uz * uz)

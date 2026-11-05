@@ -36,7 +36,7 @@ end
 function M.new(tr, nships, laps, slot_of)
     local r = { phase = "countdown", frame = 0, start = nil, laps = laps, n = nships,
         seen = {}, lap_start = {}, last = {}, best = {}, times = {}, finish = {}, out = {},
-        order = {}, done = nil, key = {}, tier = {}, scratch = {} }
+        order = {}, done = nil, key = {}, tier = {} }
     local ships = {}
     for k = 1, nships do
         ships[k] = physics.new_ship(M.grid(tr, slot_of and slot_of(k, nships) or k))
@@ -80,27 +80,29 @@ function M.update(r, ships)
         end
         return
     end
+    local finish, out, seen = r.finish, r.out, r.seen
     for i = 1, r.n do
-        local s = ships[i]
-        if not r.finish[i] and not r.out[i] then
-            if s.lap > r.seen[i] then
-                if s.lap >= 1 then
+        if not finish[i] and not out[i] then
+            local s = ships[i]
+            local lap = s.lap
+            if lap > seen[i] then
+                if lap >= 1 then
                     local lt = r.frame - r.lap_start[i]
                     r.last[i] = lt
                     r.times[i][#r.times[i] + 1] = lt
                     if not r.best[i] or lt < r.best[i] then r.best[i] = lt end
                 end
-                r.lap_start[i], r.seen[i] = r.frame, s.lap
-                if s.lap >= r.laps then
-                    r.finish[i] = r.frame - r.start
+                r.lap_start[i], seen[i] = r.frame, lap
+                if lap >= r.laps then
+                    finish[i] = r.frame - r.start
                     r.order[#r.order + 1] = i
                 end
             elseif s.dnf then
-                r.out[i] = true
+                out[i] = true
             end
         end
     end
-    if r.phase == "racing" and (r.finish[1] or r.out[1]) then
+    if r.phase == "racing" and (finish[1] or out[1]) then
         r.phase, r.done = "finished", r.frame
     end
     if r.phase == "finished" then
@@ -130,7 +132,11 @@ function M.standings(r, tr, ships, out)
         tier[i] = r.out[i] and 0 or 1
         out[i] = i
     end
-    for pos, i in ipairs(r.order) do key[i], tier[i] = -pos, 2 end
+    local order = r.order
+    for pos = 1, #order do
+        local i = order[pos]
+        key[i], tier[i] = -pos, 2
+    end
     for a = 2, r.n do -- insertion sort, descending by (tier, key), stable
         local v = out[a]
         local tv, kv = tier[v], key[v]
@@ -147,12 +153,31 @@ function M.standings(r, tr, ships, out)
     return out
 end
 
--- Ship i's position, 1..n.
+-- Ship i's position, 1..n: where standings() puts it, by counting the ships
+-- ahead of it rather than sorting them all (ties go to the lower ship index,
+-- as the stable sort leaves them).
 function M.position(r, tr, ships, i)
-    local out = M.standings(r, tr, ships, r.scratch)
-    for pos = 1, r.n do
-        if out[pos] == i then return pos end
+    local order = r.order
+    local nfin = #order
+    for pos = 1, nfin do
+        if order[pos] == i then return pos end
     end
+    local finish, out, trn = r.finish, r.out, tr.n
+    local me = ships[i]
+    local key = me.lap + (me.seg - 1 + me.t) / trn
+    local running = not out[i]
+    local pos = nfin + 1
+    for j = 1, r.n do
+        if j ~= i and not finish[j] then
+            local s = ships[j]
+            local kj = s.lap + (s.seg - 1 + s.t) / trn
+            local rj = not out[j]
+            if (rj and not running) or (rj == running and (kj > key or (kj == key and j < i))) then
+                pos = pos + 1
+            end
+        end
+    end
+    return pos
 end
 
 -- The final table: { idx, pos, time (ms or nil), best (ms or nil), dnf }.

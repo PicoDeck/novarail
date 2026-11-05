@@ -6,19 +6,22 @@
 local M = {}
 
 local gp = picocalc.gamepad
+local PAD_LEFT, PAD_RIGHT, PAD_A, PAD_B = gp.PAD_LEFT, gp.PAD_RIGHT, gp.PAD_A, gp.PAD_B
+local PAD_L, PAD_R = gp.PAD_L, gp.PAD_R
 
 -- Fills out = { steer, thrust, brake, abL, abR }. auto_thrust thrusts
 -- whenever the ship is not braking, with no button held.
 function M.read(out, auto_thrust)
     local held = gp.getButtons()
     local steer = 0
-    if held & gp.PAD_LEFT ~= 0 then steer = steer - 1 end
-    if held & gp.PAD_RIGHT ~= 0 then steer = steer + 1 end
+    if held & PAD_LEFT ~= 0 then steer = steer - 1 end
+    if held & PAD_RIGHT ~= 0 then steer = steer + 1 end
     out.steer = steer
-    out.brake = held & gp.PAD_B ~= 0
-    out.thrust = not out.brake and (auto_thrust or held & gp.PAD_A ~= 0)
-    out.abL = held & gp.PAD_L ~= 0
-    out.abR = held & gp.PAD_R ~= 0
+    local brake = held & PAD_B ~= 0
+    out.brake = brake
+    out.thrust = not brake and (auto_thrust or held & PAD_A ~= 0)
+    out.abL = held & PAD_L ~= 0
+    out.abR = held & PAD_R ~= 0
     return out
 end
 

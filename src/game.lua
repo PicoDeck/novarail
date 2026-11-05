@@ -131,45 +131,55 @@ local function race_once(env)
         ctl[i] = {}
     end
     local me, cam = ships[1], camera.new()
-    local log = env.log
+    local log = env.log -- set only with autolap
     if log then perflog.reset(log) end
     local g = { geom = 0, raster = 0, drawn = 0, drawn_max = 0, tris_max = 0, n = 0, overflow = 0 }
     local sec = { input = 0, sim = 0, camera = 0, draw = 0, hud = 0 }
     local st, hs = {}, { laps = env.laps, n = n }
     local P, dt, now = physics.P, 1 / M.FPS, sys.getTimeUs
-    local frame, prev_t0, work = 0, nil, 0
+    local sub_dt = dt / M.SUBSTEPS
+    local frame, prev_t0 = 0, nil
+    -- The section timers and gfx3d's stats feed only the perf log (autolap):
+    -- a normal race makes none of their C calls.
+    local timed = log ~= nil
+    local telemetry = dev.telemetry == true
     -- no key for accelerate (unbound in Settings -> Controls): thrust on its own
     local auto_thrust = not controls.bound(pc.gamepad.PAD_A)
     local bat0 = sys.getBattery()
     local usb0 = sys.isUSBPowered()
+    local begin_frame, end_frame, flush = perf.beginFrame, perf.endFrame, disp.flush
+    local input_update, get_pressed, BTN_ESC = input.update, input.getButtonsPressed, input.BTN_ESC
+    local get_stats = pc.gfx3d.getStats
+    local step, resolve, progress, ai_controls = physics.step, collide.resolve, race.progress, ai.controls
+    local line, total = env.line, tr.total
+    local c1, sound = ctl[1], env.sound
 
-    if env.sound then audio.start_race(env.sound) end
+    if sound then audio.start_race(sound) end
     hud.reset(h)
     input.clearState()
     perf.setTargetFPS(M.FPS)
     while true do
-        local t0 = now()
-        perf.beginFrame()
-        input.update()
-        if input.getButtonsPressed() & input.BTN_ESC ~= 0 then
+        local t0 = timed and now()
+        begin_frame()
+        input_update()
+        if get_pressed() & BTN_ESC ~= 0 then
             perf.setTargetFPS(0)
             return "quit", nil
         end
-        if race.can_drive(r) then
+        if r.phase ~= "countdown" then -- race.can_drive, without the call
             if env.auto or r.finish[1] or r.out[1] then
-                ai.controls(tr, env.line, ships, 1, drivers[1], P, 0, ctl[1])
+                ai_controls(tr, line, ships, 1, drivers[1], P, 0, c1)
             else
-                controls.read(ctl[1], auto_thrust)
-                ctl[1].thrust_scale = 1
+                controls.read(c1, auto_thrust)
+                c1.thrust_scale = 1
             end
-            -- Each rival re-plans every other frame (half of them per frame);
-            -- the physics still steps all of them every frame.
-            local pp = race.progress(tr, me)
-            for i = 2, n do
-                if (i + frame) % 2 == 0 then
-                    local lead = (race.progress(tr, ships[i]) - pp) * tr.total
-                    ai.controls(tr, env.line, ships, i, drivers[i], P, lead, ctl[i])
-                end
+            -- Each rival re-plans every other frame (half of them per frame):
+            -- the ships whose index has this frame's parity. The physics still
+            -- steps all of them every frame.
+            local pp = progress(tr, me)
+            for i = 2 + frame % 2, n, 2 do
+                local lead = (progress(tr, ships[i]) - pp) * total
+                ai_controls(tr, line, ships, i, drivers[i], P, lead, ctl[i])
             end
         else
             for i = 1, n do -- on the grid: hover, no thrust
@@ -177,72 +187,77 @@ local function race_once(env)
                 c.steer, c.thrust, c.brake, c.abL, c.abR, c.thrust_scale = 0, false, false, false, false, 1
             end
         end
-        local tsim = now()
+        local tsim = timed and now()
         local e0, hit = me.energy, 0
         for _ = 1, M.SUBSTEPS do
-            physics.step(tr, me, ctl[1], dt / M.SUBSTEPS)
+            step(tr, me, c1, sub_dt)
             hit = hit + me.impact
         end
-        for i = 2, n do physics.step(tr, ships[i], ctl[i], dt) end
+        for i = 2, n do step(tr, ships[i], ctl[i], dt) end
         local vs0 = me.vs
-        collide.resolve(tr, ships)
-        hit = hit + math.abs(me.vs - vs0) -- a shove
+        resolve(tr, ships)
+        local shove = me.vs - vs0
+        hit = hit + (shove < 0 and -shove or shove)
         if hit > 0 then camera.jolt(cam, hit) end
         if me.energy < e0 - 0.5 then hud.flash(h) end
         race.update(r, ships)
         frame = frame + 1
         if r.phase == "results" then break end
 
-        local tc = now()
+        local tc = timed and now()
         camera.update(cam, tr, me, dt)
-        local td = now()
+        local td = timed and now()
         render.draw(env.scene, tr, ships, cam)
-        local te = now()
-        st = pc.gfx3d.getStats(st)
-        local pos = race.position(r, tr, ships, 1)
+        local te = timed and now()
+        if timed then st = get_stats(st) end
         local cd = race.countdown(r)
         if cd then
             hud.countdown(h, cd)
         elseif r.finish[1] then
-            hud.banner(FINISHED[pos])
+            hud.banner(FINISHED[race.position(r, tr, ships, 1)])
         elseif r.out[1] then
             hud.banner("OUT OF ENERGY")
         end
-        hs.v, hs.lap, hs.pos, hs.energy = me.v, race.lap_of(r, ships, 1), pos, me.energy
-        if r.finish[1] then hs.lap_ms = race.ms(r.finish[1])
-        elseif race.can_drive(r) then hs.lap_ms = race.ms(r.frame - r.lap_start[1])
-        else hs.lap_ms = 0 end
-        hs.last_ms, hs.best_ms = race.ms(r.last[1]), race.ms(r.best[1])
-        hud.draw(h, hs)
-        if env.sound then audio.update(env.sound, me.v, frame) end
-
-        local t1 = now()
-        work = t1 - t0 -- integer subtraction: right across the 32-bit wrap
-        g.overflow = g.overflow + st.overflow -- every frame, warm-up included: the gate wants none
-        if prev_t0 and frame > M.WARMUP then
-            if log then perflog.add(log, work, t0 - prev_t0) end
-            g.geom, g.raster, g.drawn = g.geom + st.us_geom, g.raster + st.us_raster, g.drawn + st.drawn
-            g.drawn_max = math.max(g.drawn_max, st.drawn)
-            g.tris_max = math.max(g.tris_max, st.tris_in)
-            g.n = g.n + 1
-            sec.input, sec.sim, sec.camera = sec.input + (tsim - t0), sec.sim + (tc - tsim), sec.camera + (td - tc)
-            sec.draw, sec.hud = sec.draw + (te - td), sec.hud + (t1 - te)
+        hs.energy = me.energy
+        if hud.text_due(h) then -- the panel's text, one frame in two
+            hs.v, hs.lap, hs.pos = me.v, race.lap_of(r, ships, 1), race.position(r, tr, ships, 1)
+            if r.finish[1] then hs.lap_ms = race.ms(r.finish[1])
+            elseif r.phase ~= "countdown" then hs.lap_ms = race.ms(r.frame - r.lap_start[1])
+            else hs.lap_ms = 0 end
+            hs.last_ms, hs.best_ms = race.ms(r.last[1]), race.ms(r.best[1])
         end
-        prev_t0 = t0
-        if dev.telemetry == true and frame % 15 == 0 then
+        hud.draw(h, hs)
+        if sound then audio.update(sound, me.v, frame) end
+
+        if timed then
+            local t1 = now()
+            -- integer subtraction: right across the 32-bit wrap
+            g.overflow = g.overflow + st.overflow -- every frame, warm-up included: the gate wants none
+            if prev_t0 and frame > M.WARMUP then
+                perflog.add(log, t1 - t0, t0 - prev_t0)
+                g.geom, g.raster, g.drawn = g.geom + st.us_geom, g.raster + st.us_raster, g.drawn + st.drawn
+                g.drawn_max = math.max(g.drawn_max, st.drawn)
+                g.tris_max = math.max(g.tris_max, st.tris_in)
+                g.n = g.n + 1
+                sec.input, sec.sim, sec.camera = sec.input + (tsim - t0), sec.sim + (tc - tsim), sec.camera + (td - tc)
+                sec.draw, sec.hud = sec.draw + (te - td), sec.hud + (t1 - te)
+            end
+            prev_t0 = t0
+        end
+        if telemetry and frame % 15 == 0 then
             local music, eng, track = false, false, 0
-            if env.sound then music, eng, track = audio.playing(env.sound) end
+            if sound then music, eng, track = audio.playing(sound) end
             write_json("telemetry.json", { frame = frame, seg = me.seg, t = me.t, u = me.u,
                 v = me.v, h = me.h, psi = me.psi, lap = me.lap, energy = me.energy, phase = r.phase,
                 music = music, engine = eng, track = track })
         end
-        perf.endFrame()
-        disp.flush()
+        end_frame()
+        flush()
     end
     perf.setTargetFPS(0)
     if env.auto and not env.stay then return "quit", summary(log, g, sec, r, ships, env, frame, bat0, usb0) end
 
-    if env.sound then audio.quiet(env.sound) end
+    if sound then audio.quiet(sound) end
     hud.reset(h)
     local res = race.results(r, tr, ships)
     for _ = 1, 2 do -- both buffers

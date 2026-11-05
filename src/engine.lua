@@ -2,6 +2,8 @@
 -- engine sample for a ship speed.
 local M = {}
 
+local floor = math.floor
+
 M.V_REF = 70        -- m/s at which the note reaches RATE_IDLE + RATE_SPAN
 M.RATE_IDLE = 0.7   -- sample rate multiplier at a standstill
 M.RATE_SPAN = 0.9   -- added by V_REF
@@ -20,7 +22,8 @@ function M.rate(v)
 end
 
 function M.volume(v)
-    return math.floor(M.VOL_IDLE + M.VOL_SPAN * math.min(frac(v), 1) + 0.5)
+    local f = frac(v)
+    return floor(M.VOL_IDLE + M.VOL_SPAN * (f < 1 and f or 1) + 0.5)
 end
 
 return M

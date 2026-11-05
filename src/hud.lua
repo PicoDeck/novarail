@@ -16,6 +16,8 @@ local M = {}
 
 local disp = picocalc.display
 local rgb = disp.rgb
+local drawText, fillRect = disp.drawText, disp.fillRect
+local format = string.format
 
 local Y = 240
 -- The neon palette: a dark navy panel under a magenta edge, cyan accents.
@@ -27,7 +29,8 @@ local E_HIGH, E_MID, E_LOW = rgb(0, 210, 245), rgb(255, 60, 200), rgb(255, 70, 6
 local BIG = rgb(255, 60, 200)
 local FLASH_COL = rgb(255, 255, 255)
 
-M.EVERY = 4
+local EVERY <const> = 4
+M.EVERY = EVERY
 M.FLASH = 8
 
 function M.new()
@@ -44,42 +47,70 @@ function M.flash(h)
     h.flash = M.FLASH
 end
 
-local function field(c, key, x, y, text, fg)
-    if c[key] ~= text then
-        disp.drawText(x, y, text, fg, BG)
-        c[key] = text
-    end
+-- Whether this frame's draw() refreshes the text: the caller need not work
+-- out the values on the frames it does not.
+function M.text_due(h)
+    local frame = h.frame
+    return frame % EVERY < 2 or not h.cache[frame % 2 + 1].fresh
 end
 
--- st: { v, lap, laps, pos, n, lap_ms, last_ms, best_ms, energy (0..100) }.
+-- st: { v, lap, laps, pos, n, lap_ms, last_ms, best_ms, energy (0..100) }; all
+-- but energy only matter on a frame text_due() says so. Each field compares
+-- the value behind its text, so an unchanged field builds no string.
 function M.draw(h, st)
-    local c = h.cache[h.frame % 2 + 1]
-    h.frame = h.frame + 1
+    local frame = h.frame
+    local c = h.cache[frame % 2 + 1]
+    h.frame = frame + 1
     if not c.panel then
-        disp.fillRect(0, Y, 320, 80, BG)
-        disp.fillRect(0, Y, 320, 2, EDGE)
-        disp.drawText(168, Y + 42, "ENERGY", DIM, BG)
+        fillRect(0, Y, 320, 80, BG)
+        fillRect(0, Y, 320, 2, EDGE)
+        drawText(168, Y + 42, "ENERGY", DIM, BG)
         c.panel = true
     end
-    if not c.fresh or (h.frame - 1) % M.EVERY < 2 then
-        field(c, "spd", 8, Y + 6, string.format("%3d km/h", fmt.kmh(st.v)), HI)
-        field(c, "lap", 8, Y + 22, string.format("LAP %d/%d", st.lap, st.laps), FG)
-        field(c, "pos", 8, Y + 38, string.format("POS %d/%d", st.pos, st.n), FG)
-        field(c, "time", 8, Y + 54, "TIME " .. fmt.time(st.lap_ms), FG)
-        field(c, "last", 168, Y + 6, "LAST " .. fmt.time(st.last_ms), DIM)
-        field(c, "best", 168, Y + 22, "BEST " .. fmt.time(st.best_ms), DIM)
+    local fresh = c.fresh
+    if not fresh or frame % EVERY < 2 then
+        local kmh = fmt.kmh(st.v)
+        if c.spd ~= kmh then
+            drawText(8, Y + 6, format("%3d km/h", kmh), HI, BG)
+            c.spd = kmh
+        end
+        if c.lap ~= st.lap then
+            drawText(8, Y + 22, format("LAP %d/%d", st.lap, st.laps), FG, BG)
+            c.lap = st.lap
+        end
+        if c.pos ~= st.pos then
+            drawText(8, Y + 38, format("POS %d/%d", st.pos, st.n), FG, BG)
+            c.pos = st.pos
+        end
+        -- the three times can be nil: `fresh` draws their first text
+        local ms = st.lap_ms
+        if not fresh or c.time ~= ms then
+            drawText(8, Y + 54, "TIME " .. fmt.time(ms), FG, BG)
+            c.time = ms
+        end
+        ms = st.last_ms
+        if not fresh or c.last ~= ms then
+            drawText(168, Y + 6, "LAST " .. fmt.time(ms), DIM, BG)
+            c.last = ms
+        end
+        ms = st.best_ms
+        if not fresh or c.best ~= ms then
+            drawText(168, Y + 22, "BEST " .. fmt.time(ms), DIM, BG)
+            c.best = ms
+        end
         c.fresh = true
     end
     local e = st.energy
     local fill = (e * BAR_W + 50) // 100
     local col = e > 50 and E_HIGH or (e > 25 and E_MID or E_LOW)
-    if h.flash > 0 then
+    local flash = h.flash
+    if flash > 0 then
         col = FLASH_COL
-        h.flash = h.flash - 1
+        h.flash = flash - 1
     end
     if c.bar ~= fill or c.bar_col ~= col then
-        if fill > 0 then disp.fillRect(BAR_X, BAR_Y, fill, BAR_H, col) end
-        if fill < BAR_W then disp.fillRect(BAR_X + fill, BAR_Y, BAR_W - fill, BAR_H, BAR_BG) end
+        if fill > 0 then fillRect(BAR_X, BAR_Y, fill, BAR_H, col) end
+        if fill < BAR_W then fillRect(BAR_X + fill, BAR_Y, BAR_W - fill, BAR_H, BAR_BG) end
         c.bar, c.bar_col = fill, col
     end
 end
