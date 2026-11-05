@@ -47,6 +47,9 @@ def test_race_runs_and_steers(novarail):
     sim, data = novarail(dev={"telemetry": True})
     sim.launch_app(APP)
     tel = data / "telemetry.json"
+    # The race is running first: PicoDeck hides a key held across a launch
+    # until it is released, and launch_app does not wait for the app's start.
+    wait_json(tel, lambda d: d["frame"] >= 15)
     hold(sim, "f4", True)
     before = wait_json(tel, lambda d: d["frame"] >= 60 and d["v"] > 10)
     hold(sim, "right", True)
@@ -146,6 +149,8 @@ def test_autolap_writes_perf_json(novarail):
 def test_countdown_holds_the_grid(novarail):
     sim, data = novarail(dev={"telemetry": True})
     sim.launch_app(APP)
+    # Pressed once the app runs: a key held across a launch stays hidden.
+    wait_json(data / "telemetry.json", lambda d: d["frame"] >= 15)
     hold(sim, "f4", True)                   # accelerate held through the countdown
     early = wait_json(data / "telemetry.json", lambda d: d["frame"] >= 30)
     assert early["phase"] == "countdown" and early["v"] == 0, early
